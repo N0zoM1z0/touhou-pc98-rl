@@ -1,0 +1,93 @@
+"""Parameter constants. Was `param.rs` before.
+"""
+
+import logging
+import os
+
+import numpy as np
+import torch
+
+# === Live adjustment after training started === #
+RL_BY_HUMAN = False
+RESET_OPTIMIZER_ON_RESUME = False
+RESET_LAMBDA_ON_RESUME = False
+
+# === PATH === #
+LOG_DIR = "./logs"
+EXPORT_DIR = "./export"
+CFG_FILE = "KAIKII.CFG"
+MODEL_SAVE_DIR = "./models"
+os.makedirs(LOG_DIR, exist_ok=True)
+os.makedirs(EXPORT_DIR, exist_ok=True)
+os.makedirs(MODEL_SAVE_DIR, exist_ok=True)
+
+# === RL HYPERPARAMETERS === #
+LEARNING_RATE = 1e-4
+GAMMA = 0.995
+LAMBDA_GAE = 0.98
+CLIP_EPSILON = 0.2
+VALUE_COEFF = 0.5
+ENTROPY_COEFF_START = 0.05
+ENTROPY_COEFF_END = 0.01
+ENTROPY_ANNEAL_UPDATES = 5000
+PPO_EPOCHS = 3
+HUMAN_BC_EPOCHS = 3
+HUMAN_ADV_WEIGHT_BETA = 0.5
+HUMAN_ADV_WEIGHT_MIN = 0.25
+HUMAN_ADV_WEIGHT_MAX = 4.0
+HORIZON = 2048
+ACTION_DIM = 19
+LOGIT_CLAMP = 80.0
+FRAME_INTERVAL_MS = 36
+MAX_GRAD_NORM = 0.5
+
+# === WORKER SETTINGS === #
+NUM_WORKERS = 1 if RL_BY_HUMAN else 4
+CHUNK_SIZE = 64  # Need to dividable by `SEQ_LEN`
+MAX_POLICY_STALENESS = 2
+
+# === MODEL SETTINGS === #
+FEATURE_PROJECT_DIM = 128
+CNN_EMBED_DIM = 128
+CNN_POOL_OUT = (6, 6)
+CNN_HIDDEN_CHANNELS = [32, 64, 64]
+HIDDEN_DIM = 512
+GRU_HIDDEN_SIZE = 256
+NUM_OBJECTIVES = 3  # survival, combat, resource
+
+# === GRU === #
+SEQ_LEN = 16
+NUM_SEQS = HORIZON // SEQ_LEN
+SEQS_PER_BATCH = 4
+
+# === OBS SCHEMA === # TODO: Select game. See src/observation/schema{num} and src/games/mod.rs
+GRID_W = 96
+GRID_H = 92
+FEATURE_DIM = 273
+MAP_CHANNELS = 24
+
+# [allow(unused)]
+GAME = 5
+
+# === REWARD === # TODO: do it in rust. This is test and experimental, and I need quick changes. Compiling and wait the `uv` to finish managing packages are such a pain
+REWARD_SCALES = np.array([0.01, 0.001, 0.01], dtype=np.float32)
+
+# === LAGRANGIAN SETTINGS === #
+MAX_DEATH_RATE = 0.002
+DUAL_LR = 1.0
+DUAL_MAX = 3.0
+DUAL_MIN = 0.01
+INITIAL_LAMBDA = 1.0
+
+# === CHARACTER & CONFIG STUFFS === #
+CHAR = [2]
+CURRICULUM_CHAR = CHAR[0]
+CURRICULUM_STATE_FILE = os.path.join(LOG_DIR, "curriculum_state.json")
+
+# my favourite f***ing xpu. I love it so much.
+DEVICE = torch.device(
+    "xpu"
+    if hasattr(torch, "xpu") and torch.xpu.is_available()
+    else ("cuda" if torch.cuda.is_available() else "cpu")
+)
+logging.info(f"moppo: Using {DEVICE}")

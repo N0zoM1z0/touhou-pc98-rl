@@ -1,0 +1,161 @@
+\documentclass{book}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{algpseudocode}
+\usepackage{algorithm}
+\usepackage{placeins}
+
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{textcomp}
+
+% VS Code Dark+
+\definecolor{CodeBackground}{HTML}{1E1E1E}
+\definecolor{CodeForeground}{HTML}{D4D4D4}
+\definecolor{CodeBorder}{HTML}{3F3F46}
+\definecolor{CodeLineNumber}{HTML}{858585}
+
+\definecolor{CodeKeyword}{HTML}{569CD6}
+\definecolor{CodeComment}{HTML}{6A9955}
+\definecolor{CodeString}{HTML}{CE9178}
+\definecolor{CodeNumber}{HTML}{B5CEA8}
+\definecolor{CodeType}{HTML}{4EC9B0}
+\definecolor{CodeFunction}{HTML}{DCDCAA}
+\definecolor{CodePurple}{HTML}{C586C0}
+\definecolor{CodeVariable}{HTML}{9CDCFE}
+
+\lstdefinestyle{darkbase}{
+  backgroundcolor=\color{CodeBackground},
+  basicstyle=\ttfamily\small\color{CodeForeground},
+  identifierstyle=\color{CodeForeground},
+  keywordstyle=\bfseries\color{CodeKeyword},
+  commentstyle=\itshape\color{CodeComment},
+  stringstyle=\color{CodeString},
+  numbers=left,
+  numberstyle=\tiny\color{CodeLineNumber},
+  numbersep=10pt,
+  stepnumber=1,
+  frame=single,
+  rulecolor=\color{CodeBorder},
+  framerule=0.5pt,
+  framesep=7pt,
+  breaklines=true,
+  breakatwhitespace=false,
+  postbreak=\mbox{\textcolor{CodeLineNumber}{$\hookrightarrow$}\space},
+  columns=fullflexible,
+  keepspaces=true,
+  tabsize=4,
+  showspaces=false,
+  showtabs=false,
+  showstringspaces=false,
+  upquote=true,
+  captionpos=b,
+  xleftmargin=2em,
+  framexleftmargin=1.5em,
+  aboveskip=1em,
+  belowskip=1em
+}
+
+\lstdefinelanguage{Rust}{
+  sensitive=true,
+  morekeywords=[1]{
+    as,async,await,break,const,continue,crate,dyn,else,enum,
+    extern,fn,for,if,impl,in,let,loop,match,mod,move,mut,
+    pub,ref,return,static,struct,super,trait,type,unsafe,
+    use,where,while
+  },
+  morekeywords=[2]{
+    abstract,become,box,do,final,gen,macro,override,priv,
+    try,typeof,unsized,virtual,yield,macro_rules,raw,safe,union
+  },
+  morekeywords=[3]{
+    bool,char,str,
+    i8,i16,i32,i64,i128,isize,
+    u8,u16,u32,u64,u128,usize,
+    f32,f64
+  },
+  morekeywords=[4]{
+    true,false,self,Self
+  },
+  morecomment=[l]{//},
+  morecomment=[n]{/*}{*/},
+  morestring=[b]",
+}
+
+\lstdefinestyle{rust}{
+  style=darkbase,
+  language=Rust,
+  keywordstyle=[1]\bfseries\color{CodeKeyword},
+  keywordstyle=[2]\color{CodePurple},
+  keywordstyle=[3]\color{CodeType},
+  keywordstyle=[4]\color{CodeNumber}
+}
+
+\lstdefinestyle{python}{
+  style=darkbase,
+  language={[3]Python},
+  keywordstyle=[1]\bfseries\color{CodeKeyword},
+  keywordstyle=[2]\color{CodeType}
+}
+
+\lstdefinestyle{shell}{
+  style=darkbase,
+  language=bash,
+  keywordstyle=\bfseries\color{CodeKeyword}
+}
+
+\lstdefinestyle{cpp}{
+  style=darkbase,
+  language={[11]C++},
+  morekeywords={
+    char8_t,
+    concept,
+    consteval,
+    constinit,
+    co_await,
+    co_return,
+    co_yield,
+    requires,
+    import,
+    module
+  },
+  moredirectives={
+    include,
+    define,
+    undef,
+    if,
+    ifdef,
+    ifndef,
+    elif,
+    else,
+    endif,
+    error,
+    warning,
+    pragma
+  },
+  keywordstyle=\bfseries\color{CodeKeyword},
+  directivestyle=\color{CodePurple}
+}
+
+\lstdefinestyle{asm}{
+  style=darkbase,
+  language={[x86masm]Assembler},
+  keywordstyle=[1]\bfseries\color{CodeKeyword},
+  keywordstyle=[2]\color{CodePurple},
+  sensitive=false,
+  tabsize=4
+}
+
+\title{Documentation}
+\begin{document}
+\frontmatter
+\maketitle
+\tableofcontents
+
+\mainmatter
+
+\include{chapters/install.tex}
+\include{chapters/history.tex}
+\end{document}
