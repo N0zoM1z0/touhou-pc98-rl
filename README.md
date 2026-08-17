@@ -1,11 +1,11 @@
 # thrl - A Touhou Reinforcement Learning Framework
-Cite this repository as following:
+Cite the **paper** as following:
 ```
 @article{Liu_A_High-Fidelity_Reinforcement_2026,
-author = {Liu, T.},
-doi = {10.5281/zenodo.21788472},
-title = {{A High-Fidelity Reinforcement Learning Environment and Baseline for Multi-Objective Bullet Hell Games}},
-year = {2026}
+    author = {Liu, T.},
+    doi = {10.5281/zenodo.21788472},
+    title = {{A High-Fidelity Reinforcement Learning Environment and Baseline for Multi-Objective Bullet Hell Games}},
+    year = {2026}
 }
 ```
 # Requirements
