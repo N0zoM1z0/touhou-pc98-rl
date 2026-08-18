@@ -434,119 +434,19 @@ impl MemoryWatcher {
     }
 }
 
-#[pyclass]
-#[derive(Clone, Copy)]
-pub struct Cfg05 {
-    #[pyo3(get, set)]
-    pub live: u8,
-    #[pyo3(get, set)]
-    pub bomb: u8,
-    #[pyo3(get, set)]
-    pub stg: u8,
-    #[pyo3(get, set)]
-    pub phase: u8,
-    #[pyo3(get, set)]
-    pub end: u8,
-    #[pyo3(get, set)]
-    pub cha: u8,
-    #[pyo3(get, set)]
-    pub rank: u8,
-    #[pyo3(get, set)]
-    pub power: u8,
-}
-
-// RIP playperf....
-#[pymethods]
-impl Cfg05 {
-    #[new]
-    #[pyo3(signature = (live=2, bomb=3, stg=0, phase=0, end=0, cha=0, rank=0, power=0))]
-    pub fn new(
-        live: u8,
-        bomb: u8,
-        stg: u8,
-        phase: u8,
-        end: u8,
-        cha: u8,
-        rank: u8,
-        power: u8,
-    ) -> Self {
-        Self {
-            live,
-            bomb,
-            stg,
-            phase,
-            end,
-            cha,
-            rank,
-            power,
-        }
-    }
-
-    pub fn __repr__(&self) -> String {
-        format!(
-            "Cfg05(live={}, bomb={}, stg={}, phase={}, end={}, cha={}, rank={}, power={})",
-            self.live, self.bomb, self.stg, self.phase, self.end, self.cha, self.rank, self.power
-        )
-    }
-}
-
-#[pyclass]
-pub struct Returncfg {
-    #[pyo3(get)]
-    pub cfg: Cfg05,
-    #[pyo3(get)]
-    pub score: u8,
-}
-// R.I.P.
+/// Resolve a curriculum event from jason. `program` is the cc from Python (i cannot name it
+/// better)
+/// btw, specific cfg gen is not a good name for that, really.
 #[pyfunction]
-pub fn playperf(score: u8, tolerance: u8, time_ms: u64, chars: Vec<u8>) -> Vec<Returncfg> {
-    crate::cfg::playperf(score, tolerance, time_ms, &chars)
-        .into_iter()
-        .map(|r| Returncfg {
-            cfg: Cfg05 {
-                live: r.cfg.live,
-                bomb: r.cfg.bomb,
-                stg: r.cfg.stg,
-                phase: r.cfg.phase,
-                end: r.cfg.end,
-                cha: r.cfg.cha,
-                rank: r.cfg.rank,
-                power: r.cfg.power,
-            },
-            score: r.score,
-        })
-        .collect()
+#[pyo3(signature = (program, event, current_json=None))]
+pub fn cfg_execute(program: &str, event: &str, current_json: Option<&str>) -> String {
+    crate::cfg::execute_cc_json(program, event, current_json)
 }
 
+/// Write a json coded directly
 #[pyfunction]
-pub fn cfg_write(path: String, cfg: Cfg05) -> PyResult<()> {
-    let rust_cfg = crate::cfg::Cfg05 {
-        live: cfg.live,
-        bomb: cfg.bomb,
-        stg: cfg.stg,
-        phase: cfg.phase,
-        end: cfg.end,
-        cha: cfg.cha,
-        rank: cfg.rank,
-        power: cfg.power,
-    };
-    crate::cfg::cfg_write(std::path::Path::new(&path), &rust_cfg)
-        .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))
-}
-// this is not curriculum learning from my personal naive definition.
-#[pyfunction]
-pub fn specific_cfg_gen(stage: u8, phase: u8, rank: u8, cha: u8) -> Cfg05 {
-    let r = crate::cfg::specific_cfg_gen(stage, phase, rank, cha);
-    Cfg05 {
-        live: r.live,
-        bomb: r.bomb,
-        stg: r.stg,
-        phase: r.phase,
-        end: r.end,
-        cha: r.cha,
-        rank: r.rank,
-        power: r.power,
-    }
+pub fn cfg_write_json(path: &str, cfg_json: &str) {
+    crate::cfg::write_cfg_json(std::path::Path::new(path), cfg_json)
 }
 
 #[pyfunction]
@@ -555,6 +455,8 @@ pub fn init_logging() {
 }
 
 /// Reconstruct spatial maps from before the raw frames, direct game raw frame.
+/// So why is it not used? Well, in 1ms it has already done. So no need.
+/// (Unless you have serious memory lackages)
 #[pyfunction]
 pub fn rec_maps_bytes<'py>(
     py: Python<'py>,
@@ -586,11 +488,8 @@ pub fn rec_maps_bytes<'py>(
 fn rrr(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<MemoryWatcher>()?;
     m.add_class::<RawFrame>()?;
-    m.add_class::<Cfg05>()?;
-    m.add_class::<Returncfg>()?;
-    m.add_function(wrap_pyfunction!(playperf, m)?)?;
-    m.add_function(wrap_pyfunction!(cfg_write, m)?)?;
-    m.add_function(wrap_pyfunction!(specific_cfg_gen, m)?)?;
+    m.add_function(wrap_pyfunction!(cfg_execute, m)?)?;
+    m.add_function(wrap_pyfunction!(cfg_write_json, m)?)?;
     m.add_function(wrap_pyfunction!(init_logging, m)?)?;
     m.add_function(wrap_pyfunction!(rec_maps_bytes, m)?)?;
     Ok(())

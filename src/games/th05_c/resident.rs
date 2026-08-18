@@ -63,7 +63,6 @@ pub fn find_resident(mem: &mut ProcessMemory) -> Result<usize> {
             let rank = data[17];
             let _bgm_mode = data[18];
             let stage = data[19];
-            let playchar = data[20];
 
             tracing::debug!(
                 "Validation: cfg_power={}, credit_lives={}, credit_bombs={}, cfg_lives={}, cfg_bombs={}, rank={}, stage={}",

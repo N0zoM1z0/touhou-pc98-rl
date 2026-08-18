@@ -9,7 +9,7 @@
 //! IMPORTANT: Bomb and lives CANNOT be over 3.
 //!
 //! Can someone play game for me and test out combinations...
-//! I am really bad....
+//! I am terrible....
 //!
 //! [control]
 //! [feature]
@@ -24,7 +24,7 @@
 //! works but lemme donau the MORL farst...
 
 /*
-    Playperf Algorithm of rrr.
+    Curriculum Algorithms of rrr.
     Copyright (C) 2026  T. Liu and contributors
 
     This program is free software: you can redistribute it and/or modify
@@ -42,7 +42,8 @@
 */
 use crate::param;
 use rand::RngExt;
-use serde_json;
+use serde::Deserialize;
+use serde_json::{self, Value};
 use std::io::{self, Write};
 use std::path::Path;
 /// In KAIKII.CFG:
@@ -57,12 +58,12 @@ use std::path::Path;
 ///                         ; PLAYCHAR_MIMA = 2
 ///                         ; PLAYCHAR_YUUKA = 3
 /// rank=                   ; 0 = Easy, 1 = Normal, 2 = Hard, 3 = Lunatic
-/// power=                  ; Power level, 0 - 128.
+/// power=                  ; Power, 0 - 128.
 ///                         ; We can't lose power if we don't die
 /// Just keep all things u8 because rust don't allow u4
 /// IMPORTANT: Bomb and lives CANNOT be over 3.
 /// You have been warned.
-#[derive(Debug, Clone, Copy, serde::Serialize)]
+#[derive(Debug, Clone, Copy, serde::Serialize, Deserialize)]
 pub struct Cfg05 {
     pub live: u8,
     pub bomb: u8,
@@ -103,6 +104,309 @@ impl Default for Cfg05 {
     }
 }
 
+/// Events sent by trainer when it need a new cfg. 
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "lowercase")]
+enum CCEvent {
+    Start,
+    Success,
+    Fail,
+}
+/// Convert them to rust struct very basic
+impl CCEvent {
+    fn parse(event: &str) -> Self {
+        match event {
+            "start" => Self::Start,
+            "success" => Self::Success,
+            "fail" => Self::Fail,
+            _ => unreachable!(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct InstHeader {
+    when: CCEvent,
+    #[serde(rename = "type")]
+    kind: String,
+    name: String,
+}
+// Denying them multiple times. Why don't you read docs? Oh shit I forgot to
+// write docs but please wait, wait, wait my taisei-sim complete pls...
+#[derive(Debug, Deserialize)]
+struct StructInst {
+    #[serde(rename = "when")]
+    _when: CCEvent,
+    #[serde(rename = "type")]
+    _kind: String,
+    #[serde(rename = "name")]
+    _name: String,
+    live: u8,
+    bomb: u8,
+    stg: u8,
+    phase: u8,
+    end: u8,
+    cha: u8,
+    rank: u8,
+    power: u8,
+}
+
+#[derive(Debug, Deserialize)]
+struct SpecificCfgGenInst {
+    #[serde(rename = "when")]
+    _when: CCEvent,
+    #[serde(rename = "type")]
+    _kind: String,
+    #[serde(rename = "name")]
+    _name: String,
+    stage: u8,
+    phase: u8,
+    rank: u8,
+    cha: u8,
+}
+
+#[derive(Debug, Deserialize)]
+struct CfgGenInst {
+    #[serde(rename = "when")]
+    _when: CCEvent,
+    #[serde(rename = "type")]
+    _kind: String,
+    #[serde(rename = "name")]
+    _name: String,
+    stage: u8,
+    char_pool: Vec<u8>,
+    rank_min: u8,
+    rank_max: u8,
+    live: u8,
+    bomb: u8,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum PlayperfScore {
+    Fixed(u8),
+    Relative { from: ScoreSource, delta: i16 },
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ScoreSource {
+    CurrentConfig,
+}
+
+#[derive(Debug, Deserialize)]
+struct PlayperfInst {
+    #[serde(rename = "when")]
+    _when: CCEvent,
+    #[serde(rename = "type")]
+    _kind: String,
+    #[serde(rename = "name")]
+    _name: String,
+    score: PlayperfScore,
+    tolerance: u8,
+    time_ms: u64,
+    char_pool: Vec<u8>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AdvanceInst {
+    #[serde(rename = "when")]
+    _when: CCEvent,
+    #[serde(rename = "type")]
+    _kind: String,
+    #[serde(rename = "name")]
+    _name: String,
+}
+
+#[derive(Debug)]
+enum CCAction {
+    Struct(Cfg05),
+    SpecificCfgGen {
+        stage: u8,
+        phase: u8,
+        rank: u8,
+        cha: u8,
+    },
+    CfgGen {
+        stage: u8,
+        char_pool: Vec<u8>,
+        rank_min: u8,
+        rank_max: u8,
+        live: u8,
+        bomb: u8,
+    },
+    Playperf {
+        score: PlayperfScore,
+        tolerance: u8,
+        time_ms: u64,
+        char_pool: Vec<u8>,
+    },
+    AdvSpecCfgGen,
+}
+
+#[derive(Debug)]
+struct CCInst {
+    when: CCEvent,
+    action: CCAction,
+}
+
+/// We match the json here. I don't want to see some eval() code in rust,
+/// so use switch and match.
+fn parse_inst(value: Value) -> CCInst {
+    let header: InstHeader = serde_json::from_value(value.clone()).unwrap();
+
+    let action = match (header.kind.as_str(), header.name.as_str()) {
+        ("struct", "Cfg05") => {
+            let spec: StructInst = serde_json::from_value(value).unwrap();
+            CCAction::Struct(Cfg05 {
+                live: spec.live,
+                bomb: spec.bomb,
+                stg: spec.stg,
+                phase: spec.phase,
+                end: spec.end,
+                cha: spec.cha,
+                rank: spec.rank,
+                power: spec.power,
+            })
+        }
+        ("fn", "specific_cfg_gen") => {
+            let spec: SpecificCfgGenInst =
+                serde_json::from_value(value).unwrap();
+            CCAction::SpecificCfgGen {
+                stage: spec.stage,
+                phase: spec.phase,
+                rank: spec.rank,
+                cha: spec.cha,
+            }
+        }
+        ("fn", "cfg_gen") => {
+            let spec: CfgGenInst = serde_json::from_value(value).unwrap();
+            CCAction::CfgGen {
+                stage: spec.stage,
+                char_pool: spec.char_pool,
+                rank_min: spec.rank_min,
+                rank_max: spec.rank_max,
+                live: spec.live,
+                bomb: spec.bomb,
+            }
+        }
+        ("fn", "playperf") => {
+            let spec: PlayperfInst = serde_json::from_value(value).unwrap();
+            CCAction::Playperf {
+                score: spec.score,
+                tolerance: spec.tolerance,
+                time_ms: spec.time_ms,
+                char_pool: spec.char_pool,
+            }
+        }
+        ("advance", "specific_cfg_gen") => {
+            let _: AdvanceInst = serde_json::from_value(value).unwrap();
+            CCAction::AdvSpecCfgGen
+        }
+        _ => unreachable!(), // Ts is not our fault. Why did not read the docs?
+    };
+
+    CCInst {
+        when: header.when,
+        action,
+    }
+}
+
+/// Must have a start and only one.
+fn parse_cc(program_json: &str) -> Vec<CCInst> {
+    serde_json::from_str::<Vec<Value>>(program_json)
+        .unwrap()
+        .into_iter()
+        .map(parse_inst)
+        .collect()
+}
+
+/// Parse the playperf score and do plus/minus, so I don't need to write it in shitty python
+fn resolve_playperf_score(score: &PlayperfScore, current: Option<Cfg05>) -> u8 {
+    match score {
+        PlayperfScore::Fixed(score) => *score,
+        PlayperfScore::Relative {
+            from: ScoreSource::CurrentConfig,
+            delta,
+        } => {
+            let current = current.unwrap();
+            // Plus/minus
+            let current_score = score_cfg(current).score as i16;
+            (current_score + delta) as u8
+        }
+    }
+}
+// match things again to functions here bottom in cfg.rs.
+fn resolve_action(action: &CCAction, current: Option<Cfg05>) -> Cfg05 {
+    match action {
+        CCAction::Struct(cfg) => *cfg,
+        CCAction::SpecificCfgGen {
+            stage,
+            phase,
+            rank,
+            cha,
+        } => specific_cfg_gen(*stage, *phase, *rank, *cha),
+        CCAction::CfgGen {
+            stage,
+            char_pool,
+            rank_min,
+            rank_max,
+            live,
+            bomb,
+        } => cfg_gen(*stage, char_pool, (*rank_min, *rank_max), *live, *bomb).unwrap(),
+        CCAction::Playperf {
+            score,
+            tolerance,
+            time_ms,
+            char_pool,
+        } => {
+            let score = resolve_playperf_score(score, current);
+            let configs = playperf(score, *tolerance, *time_ms, char_pool);
+            configs[rand::rng().random_range(0..configs.len())].cfg
+        }
+        CCAction::AdvSpecCfgGen => {
+            let current = current.unwrap();
+            specific_cfg_gen(
+                current.stg,
+                current.phase,
+                current.rank,
+                current.cha,
+            )
+        }
+    }
+}
+
+/// Execute one curriculum event and return result.
+/// `program_json` is a array of event instructions. If no success or fail
+/// are included, no advancement will be done. It will be really helpful to build
+/// an overfitted agent.
+pub fn execute_cc_json(
+    program_json: &str,
+    event: &str,
+    current_json: Option<&str>,
+) -> String {
+    let insts = parse_cc(program_json);
+    let current = current_json
+        .map(|json| serde_json::from_str(json).unwrap());
+
+    let event = CCEvent::parse(event);
+    let cfg = match insts
+        .iter()
+        .find(|inst| inst.when == event)
+    {
+        Some(inst) => resolve_action(&inst.action, current),
+        None => current.unwrap(),
+    };
+
+    serde_json::to_string(&cfg).unwrap()
+}
+
+/// Decode and write a json-Cfg05
+pub fn write_cfg_json(path: &Path, cfg_json: &str) {
+    let cfg = serde_json::from_str(cfg_json).unwrap();
+    cfg_write(path, &cfg).unwrap();
+}
+
 /// This struct is to rate the cfgs
 /// according to different configs
 /// so the agent gets a score according to
@@ -115,7 +419,6 @@ pub struct Returncfg {
     pub cfg: Cfg05,
     pub score: u8,
 }
-
 
 // Somehow useless for compiler but useful for us.
 // Why not in const.rs? Because it is not used.

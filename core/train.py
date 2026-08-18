@@ -30,11 +30,11 @@ import torch.optim as optim
 
 from .algorithms import compute_gae
 from .cc import (
+    advance_cfg,
     cfg_debug,
     cfg_from_dict,
     cfg_to_dict,
     make_init_cfg,
-    spec_cfg_inner_gen,
     write_cfg,
 )
 from .logging import (
@@ -77,7 +77,7 @@ def train() -> None:
                               device=DEVICE, requires_grad=False)
 
     start_ep, update_step = 0, 0
-    cfg = make_init_cfg()
+    cfg = None
     ckpt_path = os.path.join(MODEL_SAVE_DIR, "moppo_latest.pt")
 
     # See docs for when to reset them. Normally, no need.
@@ -129,6 +129,8 @@ def train() -> None:
         logging.warning(f"Checkpoint load failed: {e}. Starting fresh.")
 
     cfg = load_curriculum_state(cfg)
+    if cfg is None:
+        cfg = make_init_cfg()
 
     last_logged_ep = csv_max_int(os.path.join(LOG_DIR, "episodes.csv"), "episode")
     last_logged_update = csv_max_int(os.path.join(LOG_DIR, "updates.csv"), "update_step")
@@ -529,15 +531,19 @@ def train() -> None:
                    tot_ent / n_upd, tot_kl / n_upd, tot_loss / n_upd,
                    lam_now, death_rate, cfg, rs, rg)
 
-        # CC advancement, rollout s
-        if rs > 0:
+        # CC advancement, rollout s. if success then success see if fail... one success is enough to adcance.
+        event = "success" if rs > 0 else ("fail" if rg > 0 else None)
+        if event is not None:
             old_cfg = cfg
-            cfg = spec_cfg_inner_gen(cfg)
-            config_version += 1
-            write_cfg(cfg)
-            logging.info(f"host: Curriculum advanced: {cfg_debug(old_cfg)} -> {cfg_debug(cfg)}")
-            for pipe in host_pipes:
-                pipe.send({"type": "config", "version": config_version})
+            cfg = advance_cfg(cfg, event)
+            if cfg != old_cfg:
+                config_version += 1
+                write_cfg(cfg)
+                logging.info(
+                    f"host: Curriculum {event}: {cfg_debug(old_cfg)} -> {cfg_debug(cfg)}"
+                )
+                for pipe in host_pipes:
+                    pipe.send({"type": "config", "version": config_version})
 
         # All workers, update your weight! Else your guys cannot keep the trend up and will become useless!
         new_weights = serialize_weights()

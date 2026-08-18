@@ -80,8 +80,101 @@ DUAL_MIN = 0.01
 INITIAL_LAMBDA = 1.0
 
 # === CHARACTER & CONFIG STUFFS === #
-CHAR = [2]
-CURRICULUM_CHAR = CHAR[0]
+"""
+Documentation:
+// specific cfg gen (stg cc)
+
+[
+  {
+    "when": "start",
+    "type": "struct",
+    "name": "Cfg05",
+    "live": 3,
+    "bomb": 3,
+    "stg": 0,
+    "phase": 0,
+    "end": 0,
+    "cha": 2,
+    "rank": 0,
+    "power": 0
+  },
+  {
+    "when": "success",
+    "type": "advance",
+    "name": "specific_cfg_gen"
+  }
+]
+
+[
+  {
+    "when": "start",
+    "type": "struct",
+    "name": "Cfg05",
+    "live": 3,
+    "bomb": 3,
+    "stg": 0,
+    "phase": 0,
+    "end": 0,
+    "cha": 2,
+    "rank": 0,
+    "power": 0
+  }
+]
+
+see playperf algorithm in paper of readme
+[
+  {
+    "when": "start",
+    "type": "fn",
+    "name": "playperf",
+    "score": 21,
+    "tolerance": 3,
+    "time_ms": 500,
+    "char_pool": [0, 1, 2, 3]
+  },
+  {
+    "when": "success",
+    "type": "fn",
+    "name": "playperf",
+    "score": {"from": "current_config", "delta": 3},
+    "tolerance": 3,
+    "time_ms": 500,
+    "char_pool": [0, 1, 2, 3]
+  },
+  {
+    "when": "fail",
+    "type": "fn",
+    "name": "playperf",
+    "score": {"from": "current_config", "delta": -3},
+    "tolerance": 3,
+    "time_ms": 500,
+    "char_pool": [0, 1, 2, 3]
+  }
+]
+"""
+
+CURRICULUM_JSON = r"""
+[
+  {
+    "when": "start",
+    "type": "struct",
+    "name": "Cfg05",
+    "live": 3,
+    "bomb": 3,
+    "stg": 0,
+    "phase": 0,
+    "end": 0,
+    "cha": 2,
+    "rank": 0,
+    "power": 0
+  },
+  {
+    "when": "success",
+    "type": "advance",
+    "name": "specific_cfg_gen"
+  }
+]
+"""
 CURRICULUM_STATE_FILE = os.path.join(LOG_DIR, "curriculum_state.json")
 
 # my favourite f***ing xpu. I love it so much.
