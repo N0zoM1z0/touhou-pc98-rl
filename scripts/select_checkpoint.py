@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import json
 import math
 import shutil
@@ -17,12 +18,32 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.evaluate_policy import evaluate
 
 
+def _evaluate_task(task: tuple[str, str, bool, int, int]) -> tuple[str, dict]:
+    """Evaluate one snapshot/seed pair in an isolated process."""
+    snapshot, image, deterministic, steps, seed = task
+    result = evaluate(
+        image=image,
+        policy="checkpoint",
+        checkpoint=snapshot,
+        deterministic=deterministic,
+        steps=steps,
+        seed=seed,
+    )
+    return snapshot, result
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--image", required=True)
     parser.add_argument("snapshots", nargs="+")
     parser.add_argument("--seeds", type=int, nargs="+", default=[41, 42, 43, 44])
     parser.add_argument("--steps", type=int, default=1_200)
+    parser.add_argument(
+        "--jobs",
+        type=int,
+        default=1,
+        help="parallel isolated emulator evaluations (default: 1)",
+    )
     parser.add_argument("--lcb-z", type=float, default=1.0)
     parser.add_argument("--deterministic", action="store_true")
     parser.add_argument("--output", default="models/pc98_entity_ppo_best.pt")
@@ -36,21 +57,35 @@ def main() -> None:
         parser.error("missing snapshot(s): " + ", ".join(missing))
     if len(set(args.seeds)) != len(args.seeds):
         parser.error("seeds must be unique")
+    if args.jobs < 1:
+        parser.error("jobs must be at least 1")
+
+    snapshot_strings = [str(snapshot) for snapshot in snapshots]
+    evaluations_by_snapshot: dict[str, list[dict]] = {
+        snapshot: [] for snapshot in snapshot_strings
+    }
+    tasks = [
+        (snapshot, args.image, args.deterministic, args.steps, seed)
+        for snapshot in snapshot_strings
+        for seed in args.seeds
+    ]
+    if args.jobs == 1:
+        results = map(_evaluate_task, tasks)
+        executor = None
+    else:
+        executor = concurrent.futures.ProcessPoolExecutor(max_workers=args.jobs)
+        results = executor.map(_evaluate_task, tasks)
+    try:
+        for snapshot, result in results:
+            evaluations_by_snapshot[snapshot].append(result)
+            print(json.dumps({"snapshot": snapshot, **result}, sort_keys=True), flush=True)
+    finally:
+        if executor is not None:
+            executor.shutdown(cancel_futures=True)
 
     candidates = []
     for snapshot in snapshots:
-        evaluations = []
-        for seed in args.seeds:
-            result = evaluate(
-                image=args.image,
-                policy="checkpoint",
-                checkpoint=str(snapshot),
-                deterministic=args.deterministic,
-                steps=args.steps,
-                seed=seed,
-            )
-            evaluations.append(result)
-            print(json.dumps({"snapshot": str(snapshot), **result}, sort_keys=True), flush=True)
+        evaluations = evaluations_by_snapshot[str(snapshot)]
 
         returns = np.asarray(
             [evaluation["scalar_return"] for evaluation in evaluations], dtype=np.float64
@@ -78,6 +113,7 @@ def main() -> None:
     report = {
         "seeds": args.seeds,
         "steps": args.steps,
+        "jobs": args.jobs,
         "deterministic": args.deterministic,
         "lcb_z": args.lcb_z,
         "selected": best["snapshot"],

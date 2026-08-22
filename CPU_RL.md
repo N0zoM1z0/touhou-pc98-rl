@@ -177,12 +177,15 @@ lower-confidence-bound score:
 ```bash
 CUDA_VISIBLE_DEVICES='' nice -n 10 taskset -c 0-7 \
   xvfb-run --auto-servernum uv run python scripts/select_checkpoint.py \
-  --image external/th05-rl.hdi --seeds 41 42 43 44 --steps 1200 \
+  --image external/th05-rl.hdi --seeds 41 42 43 44 --steps 1200 --jobs 4 \
   models/pc98rl_snapshots/*.pt
 ```
 
 This writes the selection report under ignored `runs/` and copies the selected
-snapshot to ignored `models/pc98_entity_ppo_best.pt`.
+snapshot to ignored `models/pc98_entity_ppo_best.pt`. Each parallel evaluation
+owns a private HDI copy and emulator process, so `--jobs` changes throughput
+without coupling episode state. Keep it below the number of CPUs left idle by
+other experiments.
 
 ## Short-run evidence (2026-08-22)
 
