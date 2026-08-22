@@ -32,6 +32,15 @@ def _evaluate_task(task: tuple[str, str, bool, int, int]) -> tuple[str, dict]:
     return snapshot, result
 
 
+def candidate_rank(candidate: dict) -> tuple[int, int, float]:
+    """Order policies by completion, perfect completion, then stable return."""
+    return (
+        int(candidate["successes"]),
+        int(candidate["no_miss_successes"]),
+        float(candidate["selection_score"]),
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--image", required=True)
@@ -100,16 +109,16 @@ def main() -> None:
                 float(np.mean([evaluation["death_events"] for evaluation in evaluations])), 4
             ),
             "successes": int(sum(evaluation["success"] for evaluation in evaluations)),
+            "no_miss_successes": int(
+                sum(evaluation["no_miss_success"] for evaluation in evaluations)
+            ),
             "evaluations": evaluations,
         }
         candidates.append(candidate)
 
-    # Terminal success is the primary objective; the lower-confidence-bound
-    # return then favors policies that are both strong and stable across seeds.
-    best = max(
-        candidates,
-        key=lambda candidate: (candidate["successes"], candidate["selection_score"]),
-    )
+    # Completion is primary. Among equal completion counts, prefer no-miss
+    # completions before using lower-confidence-bound return as the tie-breaker.
+    best = max(candidates, key=candidate_rank)
     report = {
         "seeds": args.seeds,
         "steps": args.steps,

@@ -1,9 +1,23 @@
 import unittest
 
 from scripts.compare_policies import summarize
+from scripts.select_checkpoint import candidate_rank
 
 
 class EvaluationSummaryTest(unittest.TestCase):
+    def test_checkpoint_rank_prefers_no_miss_before_return(self):
+        perfect = {
+            "successes": 3,
+            "no_miss_successes": 2,
+            "selection_score": -1.0,
+        }
+        higher_return = {
+            "successes": 3,
+            "no_miss_successes": 1,
+            "selection_score": 10.0,
+        }
+        self.assertGreater(candidate_rank(perfect), candidate_rank(higher_return))
+
     def test_summary_preserves_vector_objectives(self):
         summary = summarize(
             [

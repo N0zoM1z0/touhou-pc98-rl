@@ -374,9 +374,11 @@ threading is part of the algorithmic system, not a cosmetic setting.
   \end{tabular}
 \end{table}
 
-The candidate with the highest mean is not selected: seed 202 has a slightly
-higher lower-confidence score than seed 303.  This illustrates why latest-only
-or single-seed checkpointing is unreliable at this budget.
+Selection first maximizes clears, then no-miss clears, then lower-confidence
+return.  In this experiment all completion counts tie at zero, so seed 202 is
+selected because it has a slightly higher lower-confidence score than seed 303
+despite a lower mean.  This illustrates why latest-only or single-seed
+checkpointing is unreliable at this budget.
 
 \subsection{Untouched paired test}
 

@@ -177,8 +177,9 @@ CUDA_VISIBLE_DEVICES='' nice -n 10 taskset -c 0-7 \
   --baseline untrained --seeds 51 52 53 54 --steps 900
 ```
 
-Do not trust the last PPO update. Select snapshots on several fixed seeds with a
-lower-confidence-bound score:
+Do not trust the last PPO update. Select snapshots on several fixed seeds.
+Selection is lexicographic: clears, no-miss clears, then a lower-confidence-bound
+return score:
 
 ```bash
 CUDA_VISIBLE_DEVICES='' nice -n 10 taskset -c 0-7 \

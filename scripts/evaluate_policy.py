@@ -125,6 +125,7 @@ def evaluate(
     finally:
         env.close()
 
+    success = end_flag == 2
     return {
         "policy": policy,
         "seed": seed,
@@ -134,7 +135,8 @@ def evaluate(
         "raw_reward": reward_vector.round(4).tolist(),
         "death_events": deaths,
         "terminal": bool(terminal),
-        "success": end_flag == 2,
+        "success": success,
+        "no_miss_success": success and deaths == 0,
         "end_flag": end_flag,
         "scenario": scenario,
         "analytic_geometry": analytic_geometry if model is not None else None,
