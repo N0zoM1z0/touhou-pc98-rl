@@ -36,6 +36,7 @@ def _worker_main(connection, image: str, frame_interval_s: float, seed: int) -> 
     env = TH05CPUEnv(image, frame_interval_s=frame_interval_s)
     try:
         observation, reset_info = env.reset(seed=seed)
+        episode_deaths = 0
         connection.send(("ready", observation, reset_info["action_mask"]))
         while True:
             command, payload = connection.recv()
@@ -48,9 +49,14 @@ def _worker_main(connection, image: str, frame_interval_s: float, seed: int) -> 
             done = bool(terminated or truncated)
             terminal_flag = int(info["end_flag"])
             scaled_reward = info["scaled_reward_vector"]
+            episode_deaths += int(scaled_reward[0] < -0.1)
+            no_miss_success = bool(
+                done and terminal_flag == 2 and episode_deaths == 0
+            )
             if done:
                 observation, reset_info = env.reset()
                 action_mask = reset_info["action_mask"]
+                episode_deaths = 0
             else:
                 action_mask = info["action_mask"]
             connection.send(
@@ -61,6 +67,7 @@ def _worker_main(connection, image: str, frame_interval_s: float, seed: int) -> 
                     done,
                     terminal_flag,
                     action_mask,
+                    no_miss_success,
                 )
             )
     except BaseException:
@@ -117,7 +124,14 @@ class WorkerPool:
     def step(self, actions: np.ndarray):
         for connection, action in zip(self.connections, actions, strict=True):
             connection.send(("step", int(action)))
-        observations, rewards, dones, flags, action_masks = [], [], [], [], []
+        observations, rewards, dones, flags, action_masks, no_miss_successes = (
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+        )
         for worker_id, connection in enumerate(self.connections):
             if not connection.poll(self.timeout_s):
                 raise TimeoutError(
@@ -126,12 +140,13 @@ class WorkerPool:
             message = connection.recv()
             if message[0] == "error":
                 raise RuntimeError(f"worker {worker_id} failed:\n{message[1]}")
-            _, observation, reward, done, flag, action_mask = message
+            _, observation, reward, done, flag, action_mask, no_miss_success = message
             observations.append(observation)
             rewards.append(reward)
             dones.append(done)
             flags.append(flag)
             action_masks.append(action_mask)
+            no_miss_successes.append(no_miss_success)
         self.observations = np.stack(observations).astype(np.float32, copy=False)
         self.action_masks = np.stack(action_masks).astype(np.bool_, copy=False)
         return (
@@ -140,6 +155,7 @@ class WorkerPool:
             np.asarray(dones, dtype=np.float32),
             np.asarray(flags, dtype=np.uint8),
             self.action_masks,
+            np.asarray(no_miss_successes, dtype=np.bool_),
         )
 
     def close(self) -> None:
@@ -265,7 +281,7 @@ def train(args: argparse.Namespace) -> None:
                 (args.rollout_steps, args.workers, 19), dtype=np.bool_
             )
             removed_probability_mass = 0.0
-            successes = failures = 0
+            successes = failures = no_miss_successes = 0
 
             model.eval()
             for step in range(args.rollout_steps):
@@ -292,10 +308,18 @@ def train(args: argparse.Namespace) -> None:
                 actions[step] = action.numpy()
                 log_probabilities[step] = log_probability.numpy()
                 values[step] = value.numpy()
-                observation, reward, done, flags, action_mask = pool.step(actions[step])
+                (
+                    observation,
+                    reward,
+                    done,
+                    flags,
+                    action_mask,
+                    step_no_miss_successes,
+                ) = pool.step(actions[step])
                 rewards[step] = reward
                 dones[step] = done
                 successes += int(np.count_nonzero(flags == 2))
+                no_miss_successes += int(np.count_nonzero(step_no_miss_successes))
                 failures += int(np.count_nonzero(flags == 1))
                 hidden = next_hidden * torch.from_numpy(1.0 - done).view(1, -1, 1)
 
@@ -433,6 +457,7 @@ def train(args: argparse.Namespace) -> None:
                     np.bincount(actions.reshape(-1), minlength=19) / actions.size
                 ).round(4).tolist(),
                 "successes": successes,
+                "no_miss_successes": no_miss_successes,
                 "failures": failures,
                 "early_stop": stop_early,
                 "analytic_geometry": args.analytic_geometry,

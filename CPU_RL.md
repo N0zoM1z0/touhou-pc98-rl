@@ -152,7 +152,9 @@ normalization is supplied by the TH05 adapter rather than embedded in PPO.
 current mask only removes a bomb with no bomb stock and boundary-directed moves
 that are equivalent under TH05's position clamp; it does not contain a scripted
 collision-avoidance policy. Both switches are experimental and should be
-ablated against the same transition budget.
+ablated against the same transition budget. Workers track deaths across rollout
+boundaries and log both `successes` and `no_miss_successes` for completed
+episodes.
 
 Reset waits until TH05's initial invincibility/input lock ends. The older
 readable-memory gate exposed roughly 80 uncontrollable transitions per reset

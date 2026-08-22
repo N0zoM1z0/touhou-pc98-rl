@@ -200,7 +200,10 @@ monotone.  Our short runs directly contradict that assumption: a policy that
 improved at 24,576 transitions regressed badly by 49,152.  Periodic immutable
 snapshots, a disjoint validation split, and an untouched paired test do not
 eliminate selection bias, but they make it visible and prevent the last update
-from becoming the result by accident.
+from becoming the result by accident.  Snapshot ranking is lexicographic:
+completion count, no-miss completion count, then lower-confidence-bound return.
+Workers retain episode-local death state so training metrics distinguish a
+successful clear from a no-miss clear even when an episode spans rollouts.
 
 \section{System design}
 
