@@ -6,10 +6,22 @@ from pathlib import Path
 import numpy as np
 
 from pc98rl import _native
-from pc98rl.env import describe_th05_scenario, resolve_dosbox_executable
+from pc98rl.env import (
+    MISS_COUNT_INDEX,
+    describe_th05_scenario,
+    is_miss_transition,
+    resolve_dosbox_executable,
+)
 
 
 class EmulatorResolutionTest(unittest.TestCase):
+    def test_miss_event_comes_from_resident_counter_not_reward_sign(self):
+        previous = np.zeros(273, dtype=np.float32)
+        current = previous.copy()
+        current[MISS_COUNT_INDEX] = 0.1
+        self.assertTrue(is_miss_transition(previous, current))
+        self.assertFalse(is_miss_transition(current, current))
+
     def test_scenario_uses_human_stage_number(self):
         observation = np.zeros(273, dtype=np.float32)
         observation[8] = 0.5

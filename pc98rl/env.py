@@ -18,6 +18,7 @@ from .model import FEATURE_DIM
 
 
 ACTION_DIM = 19
+MISS_COUNT_INDEX = 34
 DEFAULT_REWARD_SCALES = np.asarray((0.01, 0.001, 0.01), dtype=np.float32)
 DEFAULT_REWARD_WEIGHTS = np.asarray((1.0, 1.0, 0.25), dtype=np.float32)
 TH05_KINEMATICS = KinematicSpec(
@@ -76,6 +77,20 @@ class TH05Constraints(ConstraintProvider):
 
 
 TH05_CONSTRAINTS = TH05Constraints()
+
+
+def is_miss_transition(
+    previous_observation: np.ndarray, observation: np.ndarray
+) -> bool:
+    """Detect the resident miss counter increment independently of reward shaping."""
+    previous_observation = np.asarray(previous_observation, dtype=np.float32)
+    observation = np.asarray(observation, dtype=np.float32)
+    if previous_observation.shape != (FEATURE_DIM,) or observation.shape != (FEATURE_DIM,):
+        raise ValueError(f"expected two {FEATURE_DIM}-feature observations")
+    return bool(
+        observation[MISS_COUNT_INDEX]
+        > previous_observation[MISS_COUNT_INDEX] + 0.05
+    )
 
 
 def describe_th05_scenario(observation: np.ndarray) -> dict[str, int | str]:
@@ -264,6 +279,7 @@ class TH05CPUEnv(gym.Env):
             raise RuntimeError("lost TH05 state while stepping")
         features, end_flag, rewards, raw_frame = state
         observation = np.asarray(features, dtype=np.float32)
+        miss_event = is_miss_transition(self._observation, observation)
         reward_vector = np.asarray(rewards, dtype=np.float32)
         scaled_reward_vector = reward_vector * self.reward_scales
         reward = float(np.dot(scaled_reward_vector, self.reward_weights))
@@ -273,6 +289,7 @@ class TH05CPUEnv(gym.Env):
         info = {
             "end_flag": int(end_flag),
             "success": int(end_flag) == 2,
+            "miss_event": miss_event,
             "reward_vector": reward_vector,
             "scaled_reward_vector": scaled_reward_vector,
             "raw_frame": raw_frame,
@@ -290,8 +307,10 @@ class TH05CPUEnv(gym.Env):
 
 __all__ = [
     "ACTION_DIM",
+    "MISS_COUNT_INDEX",
     "TH05_ACTIONS",
     "TH05_CONSTRAINTS",
     "TH05_KINEMATICS",
     "TH05CPUEnv",
+    "is_miss_transition",
 ]

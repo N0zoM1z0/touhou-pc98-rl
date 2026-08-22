@@ -4,6 +4,7 @@ import numpy as np
 import torch
 
 from pc98rl.ppo import (
+    _add_extra_miss_cost,
     _apply_checkpoint,
     _as_sequences,
     _balanced_masked_bce,
@@ -14,6 +15,13 @@ from pc98rl.ppo import (
 
 
 class CpuPPOHelpersTest(unittest.TestCase):
+    def test_extra_miss_cost_separates_miss_from_completion_reward(self):
+        rewards = np.asarray([[1.5, 0.2, -0.3], [-1.0, 0.0, 0.0]], dtype=np.float32)
+        shaped = _add_extra_miss_cost(rewards, np.asarray([True, False]), 2.0)
+        np.testing.assert_allclose(shaped[:, 0], [-0.5, -1.0])
+        np.testing.assert_allclose(shaped[:, 1:], rewards[:, 1:])
+        np.testing.assert_allclose(rewards[:, 0], [1.5, -1.0])
+
     def test_vector_gae_does_not_bootstrap_across_terminal(self):
         rewards = np.zeros((2, 1, 3), dtype=np.float32)
         values = np.ones_like(rewards)

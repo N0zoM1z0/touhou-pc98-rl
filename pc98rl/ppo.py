@@ -51,7 +51,8 @@ def _worker_main(connection, image: str, frame_interval_s: float, seed: int) -> 
             done = bool(terminated or truncated)
             terminal_flag = int(info["end_flag"])
             scaled_reward = info["scaled_reward_vector"]
-            episode_deaths += int(scaled_reward[0] < -0.1)
+            miss_event = bool(info["miss_event"])
+            episode_deaths += int(miss_event)
             no_miss_success = bool(
                 done and terminal_flag == 2 and episode_deaths == 0
             )
@@ -70,6 +71,7 @@ def _worker_main(connection, image: str, frame_interval_s: float, seed: int) -> 
                     terminal_flag,
                     action_mask,
                     no_miss_success,
+                    miss_event,
                 )
             )
     except BaseException:
@@ -126,7 +128,8 @@ class WorkerPool:
     def step(self, actions: np.ndarray):
         for connection, action in zip(self.connections, actions, strict=True):
             connection.send(("step", int(action)))
-        observations, rewards, dones, flags, action_masks, no_miss_successes = (
+        observations, rewards, dones, flags, action_masks, no_miss_successes, miss_events = (
+            [],
             [],
             [],
             [],
@@ -142,13 +145,23 @@ class WorkerPool:
             message = connection.recv()
             if message[0] == "error":
                 raise RuntimeError(f"worker {worker_id} failed:\n{message[1]}")
-            _, observation, reward, done, flag, action_mask, no_miss_success = message
+            (
+                _,
+                observation,
+                reward,
+                done,
+                flag,
+                action_mask,
+                no_miss_success,
+                miss_event,
+            ) = message
             observations.append(observation)
             rewards.append(reward)
             dones.append(done)
             flags.append(flag)
             action_masks.append(action_mask)
             no_miss_successes.append(no_miss_success)
+            miss_events.append(miss_event)
         self.observations = np.stack(observations).astype(np.float32, copy=False)
         self.action_masks = np.stack(action_masks).astype(np.bool_, copy=False)
         return (
@@ -158,6 +171,7 @@ class WorkerPool:
             np.asarray(flags, dtype=np.uint8),
             self.action_masks,
             np.asarray(no_miss_successes, dtype=np.bool_),
+            np.asarray(miss_events, dtype=np.bool_),
         )
 
     def close(self) -> None:
@@ -192,6 +206,21 @@ def _vector_gae(
         accumulator = delta + gamma * gae_lambda * not_done * accumulator
         advantages[step] = accumulator
     return advantages, advantages + values
+
+
+def _add_extra_miss_cost(
+    rewards: np.ndarray, miss_events: np.ndarray, penalty: float
+) -> np.ndarray:
+    """Add a miss-only cost without changing the checkpoint value-head layout."""
+    rewards = np.asarray(rewards, dtype=np.float32)
+    miss_events = np.asarray(miss_events, dtype=np.bool_)
+    if rewards.shape[:-1] != miss_events.shape or rewards.shape[-1] != 3:
+        raise ValueError("rewards must be [..., 3] and match miss event shape")
+    if penalty < 0.0:
+        raise ValueError("miss penalty must be non-negative")
+    shaped = rewards.copy()
+    shaped[..., 0] -= float(penalty) * miss_events
+    return shaped
 
 
 def _as_sequences(array: np.ndarray, sequence_length: int) -> np.ndarray:
@@ -321,6 +350,8 @@ def train(args: argparse.Namespace) -> None:
         raise ValueError("rollout-steps must be divisible by sequence-length")
     if args.future_miss_auxiliary_coefficient < 0.0:
         raise ValueError("future-miss-auxiliary-coefficient must be non-negative")
+    if args.extra_miss_penalty < 0.0:
+        raise ValueError("extra-miss-penalty must be non-negative")
     risk_horizons = tuple(args.future_miss_horizons)
     if any(horizon < 1 for horizon in risk_horizons):
         raise ValueError("future-miss-horizons must be positive")
@@ -381,6 +412,11 @@ def train(args: argparse.Namespace) -> None:
                 "--analytic-geometry must match the checkpoint architecture"
             )
     if resume_checkpoint is not None:
+        saved_miss_penalty = float(
+            resume_checkpoint.get("args", {}).get("extra_miss_penalty", 0.0)
+        )
+        if saved_miss_penalty != args.extra_miss_penalty:
+            raise ValueError("extra-miss-penalty must match when resuming")
         saved_risk_enabled = resume_checkpoint.get("future_miss_head") is not None
         if saved_risk_enabled != risk_enabled:
             raise ValueError(
@@ -456,6 +492,9 @@ def train(args: argparse.Namespace) -> None:
             action_masks = np.empty(
                 (args.rollout_steps, args.workers, 19), dtype=np.bool_
             )
+            miss_events = np.empty(
+                (args.rollout_steps, args.workers), dtype=np.bool_
+            )
             removed_probability_mass = 0.0
             successes = failures = no_miss_successes = 0
 
@@ -491,8 +530,12 @@ def train(args: argparse.Namespace) -> None:
                     flags,
                     action_mask,
                     step_no_miss_successes,
+                    step_miss_events,
                 ) = pool.step(actions[step])
-                rewards[step] = reward
+                rewards[step] = _add_extra_miss_cost(
+                    reward, step_miss_events, args.extra_miss_penalty
+                )
+                miss_events[step] = step_miss_events
                 dones[step] = done
                 successes += int(np.count_nonzero(flags == 2))
                 no_miss_successes += int(np.count_nonzero(step_no_miss_successes))
@@ -522,7 +565,7 @@ def train(args: argparse.Namespace) -> None:
             risk_targets = risk_valid = None
             if risk_head is not None:
                 risk_targets, risk_valid = _future_miss_targets(
-                    rewards[..., 0] < -0.1,
+                    miss_events,
                     dones > 0.5,
                     risk_horizons,
                 )
@@ -695,7 +738,8 @@ def train(args: argparse.Namespace) -> None:
                     else []
                 ),
                 "reward_mean": np.mean(rewards, axis=(0, 1)).round(6).tolist(),
-                "death_events": int(np.count_nonzero(rewards[..., 0] < -0.1)),
+                "death_events": int(np.count_nonzero(miss_events)),
+                "extra_miss_penalty": args.extra_miss_penalty,
                 "action_frequency": (
                     np.bincount(actions.reshape(-1), minlength=19) / actions.size
                 ).round(4).tolist(),
@@ -768,6 +812,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--value-clip", type=float, default=0.2)
     parser.add_argument("--value-coefficient", type=float, default=0.5)
     parser.add_argument("--entropy-coefficient", type=float, default=0.02)
+    parser.add_argument(
+        "--extra-miss-penalty",
+        type=float,
+        default=0.0,
+        help=(
+            "additional scaled survival-objective cost for each observed miss; "
+            "keeps the three-head checkpoint architecture unchanged"
+        ),
+    )
     parser.add_argument(
         "--future-miss-auxiliary-coefficient",
         type=float,

@@ -117,7 +117,7 @@ def evaluate(
             action_mask = info["action_mask"]
             scalar_return += reward
             reward_vector += info["reward_vector"]
-            deaths += int(info["reward_vector"][0] < -10.0)
+            deaths += int(info["miss_event"])
             end_flag = int(info["end_flag"])
             completed_steps += 1
             if terminal or truncated:
