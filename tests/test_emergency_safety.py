@@ -4,7 +4,43 @@ import numpy as np
 
 from pc98rl.env import ACTION_DIM, TH05_KINEMATICS
 from pc98rl.model import ENTITY_COUNT, ENTITY_DIM, FEATURE_DIM, GLOBAL_DIM
-from pc98rl.safety import EmergencyBombShield
+from pc98rl.safety import AuditedRegularBulletShield, EmergencyBombShield
+
+
+class _FakeRawFrame:
+    def __init__(self, mask):
+        self.mask = mask
+        self.calls = []
+
+    def regular_bullet_action_mask(self, horizon_frames, extra_margin_px):
+        self.calls.append((horizon_frames, extra_margin_px))
+        return self.mask
+
+
+class AuditedRegularBulletShieldTest(unittest.TestCase):
+    def test_combines_native_and_structural_masks(self):
+        base = np.ones(19, dtype=np.bool_)
+        base[1] = False
+        native = np.ones(19, dtype=np.bool_)
+        native[2] = False
+        frame = _FakeRawFrame(native)
+        shield = AuditedRegularBulletShield(horizon_frames=3, extra_margin_px=0.5)
+        mask, intervened = shield.apply(frame, base)
+        self.assertTrue(intervened)
+        self.assertFalse(mask[1])
+        self.assertFalse(mask[2])
+        self.assertEqual(frame.calls, [(3, 0.5)])
+
+    def test_fails_open_if_combination_is_empty(self):
+        base = np.zeros(19, dtype=np.bool_)
+        base[4] = True
+        native = np.ones(19, dtype=np.bool_)
+        native[4] = False
+        mask, intervened = AuditedRegularBulletShield().apply(
+            _FakeRawFrame(native), base
+        )
+        np.testing.assert_array_equal(mask, base)
+        self.assertFalse(intervened)
 
 
 class EmergencyBombShieldTest(unittest.TestCase):

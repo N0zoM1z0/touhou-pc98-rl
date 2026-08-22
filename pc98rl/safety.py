@@ -121,4 +121,37 @@ class EmergencyBombShield:
         return mask, flags
 
 
-__all__ = ["EmergencyBombShield"]
+class AuditedRegularBulletShield:
+    """Combine the native ReC98-derived regular-bullet mask with base rules."""
+
+    def __init__(self, *, horizon_frames: int = 2, extra_margin_px: float = 0.0):
+        if not 1 <= horizon_frames <= 16:
+            raise ValueError("horizon_frames must be between 1 and 16")
+        if not np.isfinite(extra_margin_px) or extra_margin_px < 0.0:
+            raise ValueError("extra_margin_px must be finite and non-negative")
+        self.horizon_frames = int(horizon_frames)
+        self.extra_margin_px = float(extra_margin_px)
+
+    def apply(self, raw_frame, base_mask: np.ndarray) -> tuple[np.ndarray, bool]:
+        base_mask = np.asarray(base_mask, dtype=np.bool_)
+        if base_mask.shape != (19,):
+            raise ValueError("expected a 19-action base mask")
+        native_mask = np.asarray(
+            raw_frame.regular_bullet_action_mask(
+                self.horizon_frames, self.extra_margin_px
+            ),
+            dtype=np.bool_,
+        )
+        if native_mask.shape != base_mask.shape:
+            raise ValueError("native regular-bullet mask has the wrong shape")
+        combined = base_mask & native_mask
+        # If boundaries/resources remove every native-safe choice, retaining
+        # the base mask is better than deadlocking the policy. A legal bomb is
+        # included by the native mask and prevents this fallback when present.
+        if not combined.any():
+            return base_mask.copy(), False
+        intervened = bool(np.any(base_mask & ~combined))
+        return combined, intervened
+
+
+__all__ = ["AuditedRegularBulletShield", "EmergencyBombShield"]

@@ -1,7 +1,7 @@
 use crate::games::th05_c::GameState;
 use crate::games::th05_c::watcher::TH05MemoryWatcher;
 use crate::observation::schema1::ObservationBuilder;
-use pyo3::exceptions::PyRuntimeError;
+use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use serde::{Deserialize, Serialize};
@@ -31,6 +31,94 @@ use std::io::ErrorKind;
 #[derive(Clone, Serialize, Deserialize)]
 pub struct RawFrame {
     pub(crate) state: GameState,
+}
+
+const REGULAR_BULLET_KILLBOX_HALF_EXTENT_PX: f32 = 4.0;
+const REGULAR_BULLET_GRAZE_LEFT_PX: f32 = 16.0;
+const REGULAR_BULLET_GRAZE_RIGHT_PX: f32 = 20.0;
+const REGULAR_BULLET_GRAZE_VERTICAL_PX: f32 = 22.0;
+
+fn playchar_speeds_subpixel(playchar: u8) -> (f32, f32) {
+    match playchar {
+        0 => (56.0, 40.0),
+        1 => (64.0, 48.0),
+        2 => (72.0, 52.0),
+        3 => (56.0, 40.0),
+        _ => (56.0, 40.0),
+    }
+}
+
+fn movement_velocity_px(action: usize, playchar: u8) -> (f32, f32) {
+    let movement = action % 9;
+    let focused = action >= 9;
+    let (mut aligned, mut diagonal) = playchar_speeds_subpixel(playchar);
+    if focused {
+        aligned = (aligned as i16 / 2) as f32;
+        diagonal = (diagonal as i16 / 2) as f32;
+    }
+    aligned /= 16.0;
+    diagonal /= 16.0;
+    match movement {
+        0 => (0.0, 0.0),
+        1 => (-aligned, 0.0),
+        2 => (aligned, 0.0),
+        3 => (0.0, -aligned),
+        4 => (0.0, aligned),
+        5 => (-diagonal, -diagonal),
+        6 => (-diagonal, diagonal),
+        7 => (diagonal, -diagonal),
+        8 => (diagonal, diagonal),
+        _ => unreachable!(),
+    }
+}
+
+fn regular_bullet_action_mask(
+    state: &GameState,
+    horizon_frames: u8,
+    extra_margin_px: f32,
+) -> Vec<bool> {
+    let mut mask = vec![true; 19];
+    if state.player.invincibility_time > 0
+        || state.player.invincible_via_bomb
+        || state.player.miss_frame > 0
+    {
+        return mask;
+    }
+    let (player_x, player_y) = state.player.pos.to_pixels();
+    let extent = REGULAR_BULLET_KILLBOX_HALF_EXTENT_PX + extra_margin_px;
+    for (action, valid) in mask[..18].iter_mut().enumerate() {
+        let (player_vx, player_vy) = movement_velocity_px(action, state.resident.playchar);
+        'bullets: for bullet in state.get_active_bullets() {
+            // ReC98: spawn flags 3 and above are the delay cloud, and move
+            // flags 4 and above are decay. Neither state has a hitbox.
+            if bullet.spawn_flag >= 3 || bullet.move_flag >= 4 {
+                continue;
+            }
+            let (bullet_x, bullet_y) = bullet.get_pixel_pos();
+            let (bullet_vx, bullet_vy) = bullet.pos.velocity_pixels();
+            // BSF_ACTIVE=2 becomes BSF_GRAZEABLE=0 before collision testing.
+            // A grazeable bullet must enter the asymmetric graze box in one
+            // frame before its 8x8 killbox becomes active in a later frame.
+            let mut collision_active = bullet.spawn_flag == 1;
+            for frame in 1..=horizon_frames {
+                let time = frame as f32;
+                let dx = bullet_x - player_x + (bullet_vx - player_vx) * time;
+                let dy = bullet_y - player_y + (bullet_vy - player_vy) * time;
+                if collision_active && dx.abs() <= extent && dy.abs() <= extent {
+                    *valid = false;
+                    break 'bullets;
+                }
+                if !collision_active
+                    && dx >= -REGULAR_BULLET_GRAZE_LEFT_PX
+                    && dx <= REGULAR_BULLET_GRAZE_RIGHT_PX
+                    && dy.abs() <= REGULAR_BULLET_GRAZE_VERTICAL_PX
+                {
+                    collision_active = true;
+                }
+            }
+        }
+    }
+    mask
 }
 #[allow(clippy::new_without_default)]
 // You clippy self touch the code here and got beated...
@@ -126,6 +214,30 @@ impl RawFrame {
             "RawFrame(stage={}, frame={})",
             self.state.resident.stage, self.state.resident.frames
         )
+    }
+
+    /// Mask movement actions whose short projected path intersects an active
+    /// regular-bullet killbox. Special projectiles are intentionally excluded.
+    pub fn regular_bullet_action_mask(
+        &self,
+        horizon_frames: u8,
+        extra_margin_px: f32,
+    ) -> PyResult<Vec<bool>> {
+        if horizon_frames == 0 || horizon_frames > 16 {
+            return Err(PyValueError::new_err(
+                "horizon_frames must be between 1 and 16",
+            ));
+        }
+        if !extra_margin_px.is_finite() || extra_margin_px < 0.0 {
+            return Err(PyValueError::new_err(
+                "extra_margin_px must be finite and non-negative",
+            ));
+        }
+        Ok(regular_bullet_action_mask(
+            &self.state,
+            horizon_frames,
+            extra_margin_px,
+        ))
     }
 }
 
@@ -609,7 +721,8 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::MemoryWatcher;
+    use super::{MemoryWatcher, RawFrame, regular_bullet_action_mask};
+    use crate::games::th05_c::types::{Bullet, PlayfieldMotion};
 
     #[test]
     fn dummy_video_is_only_for_displayless_launches() {
@@ -625,5 +738,117 @@ mod tests {
         assert!(!MemoryWatcher::should_force_dummy_sdl_for(
             false, false, true
         ));
+    }
+
+    #[test]
+    fn audited_bullet_mask_keeps_escape_actions() {
+        let mut frame = RawFrame::new();
+        frame.state.resident.playchar = 2;
+        frame.state.player.pos.cur_x = 100 * 16;
+        frame.state.player.pos.cur_y = 100 * 16;
+        frame.state.bullets.push(Bullet {
+            flag: 1,
+            age: 10,
+            pos: PlayfieldMotion {
+                cur_x: 112 * 16,
+                cur_y: 100 * 16,
+                prev_x: 116 * 16,
+                prev_y: 100 * 16,
+                vel_x: -4 * 16,
+                vel_y: 0,
+            },
+            from_group: 0,
+            speed_cur: 0,
+            angle: 0,
+            spawn_flag: 1,
+            move_flag: 2,
+            special_motion: 0,
+            speed_final: 0,
+            decel_time_or_turns: 0,
+            decel_delta_or_angle: 0,
+            patnum: 0,
+        });
+
+        let mask = regular_bullet_action_mask(&frame.state, 2, 0.0);
+        assert!(!mask[0]);
+        assert!(mask[1]);
+        assert!(!mask[2]);
+        assert!(mask[18]);
+    }
+
+    #[test]
+    fn cloud_or_invincible_bullets_do_not_constrain_actions() {
+        let mut frame = RawFrame::new();
+        frame.state.player.pos.cur_x = 100 * 16;
+        frame.state.player.pos.cur_y = 100 * 16;
+        frame.state.bullets.push(Bullet {
+            flag: 1,
+            age: 0,
+            pos: PlayfieldMotion {
+                cur_x: 100 * 16,
+                cur_y: 100 * 16,
+                prev_x: 100 * 16,
+                prev_y: 100 * 16,
+                vel_x: 0,
+                vel_y: 0,
+            },
+            from_group: 0,
+            speed_cur: 0,
+            angle: 0,
+            spawn_flag: 3,
+            move_flag: 2,
+            special_motion: 0,
+            speed_final: 0,
+            decel_time_or_turns: 0,
+            decel_delta_or_angle: 0,
+            patnum: 0,
+        });
+        assert!(
+            regular_bullet_action_mask(&frame.state, 2, 0.0)
+                .iter()
+                .all(|v| *v)
+        );
+
+        frame.state.bullets[0].spawn_flag = 1;
+        frame.state.player.invincibility_time = 1;
+        assert!(
+            regular_bullet_action_mask(&frame.state, 2, 0.0)
+                .iter()
+                .all(|v| *v)
+        );
+    }
+
+    #[test]
+    fn grazeable_bullet_only_collides_on_a_later_frame() {
+        let mut frame = RawFrame::new();
+        frame.state.resident.playchar = 2;
+        frame.state.player.pos.cur_x = 100 * 16;
+        frame.state.player.pos.cur_y = 100 * 16;
+        frame.state.bullets.push(Bullet {
+            flag: 1,
+            age: 10,
+            pos: PlayfieldMotion {
+                cur_x: 112 * 16,
+                cur_y: 100 * 16,
+                prev_x: 116 * 16,
+                prev_y: 100 * 16,
+                vel_x: -4 * 16,
+                vel_y: 0,
+            },
+            from_group: 0,
+            speed_cur: 0,
+            angle: 0,
+            spawn_flag: 0,
+            move_flag: 2,
+            special_motion: 0,
+            speed_final: 0,
+            decel_time_or_turns: 0,
+            decel_delta_or_angle: 0,
+            patnum: 0,
+        });
+
+        assert!(regular_bullet_action_mask(&frame.state, 1, 0.0)[0]);
+        assert!(!regular_bullet_action_mask(&frame.state, 2, 0.0)[0]);
+        assert!(regular_bullet_action_mask(&frame.state, 2, 0.0)[1]);
     }
 }

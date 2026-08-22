@@ -26,10 +26,17 @@ from .env import (
     describe_th05_scenario,
 )
 from .model import FEATURE_DIM, EntityActorCritic, FutureMissHead
-from .safety import EmergencyBombShield
+from .safety import AuditedRegularBulletShield, EmergencyBombShield
 
 
-def _worker_main(connection, image: str, frame_interval_s: float, seed: int) -> None:
+def _worker_main(
+    connection,
+    image: str,
+    frame_interval_s: float,
+    seed: int,
+    regular_bullet_safety_horizon: int,
+    regular_bullet_safety_margin: float,
+) -> None:
     """Own one DOSBox-X process and keep all emulator work off the trainer."""
     torch.set_num_threads(1)
     try:
@@ -37,10 +44,29 @@ def _worker_main(connection, image: str, frame_interval_s: float, seed: int) -> 
     except RuntimeError:
         pass
     env = TH05CPUEnv(image, frame_interval_s=frame_interval_s)
+    regular_bullet_shield = (
+        AuditedRegularBulletShield(
+            horizon_frames=regular_bullet_safety_horizon,
+            extra_margin_px=regular_bullet_safety_margin,
+        )
+        if regular_bullet_safety_horizon > 0
+        else None
+    )
+
+    def action_mask_from_info(info):
+        action_mask = info["action_mask"]
+        intervention = False
+        if regular_bullet_shield is not None:
+            action_mask, intervention = regular_bullet_shield.apply(
+                info["raw_frame"], action_mask
+            )
+        return action_mask, intervention
+
     try:
         observation, reset_info = env.reset(seed=seed)
         episode_deaths = 0
-        connection.send(("ready", observation, reset_info["action_mask"]))
+        action_mask, intervention = action_mask_from_info(reset_info)
+        connection.send(("ready", observation, action_mask, intervention))
         while True:
             command, payload = connection.recv()
             if command == "close":
@@ -59,10 +85,10 @@ def _worker_main(connection, image: str, frame_interval_s: float, seed: int) -> 
             )
             if done:
                 observation, reset_info = env.reset()
-                action_mask = reset_info["action_mask"]
+                action_mask, intervention = action_mask_from_info(reset_info)
                 episode_deaths = 0
             else:
-                action_mask = info["action_mask"]
+                action_mask, intervention = action_mask_from_info(info)
             connection.send(
                 (
                     "step",
@@ -73,6 +99,7 @@ def _worker_main(connection, image: str, frame_interval_s: float, seed: int) -> 
                     action_mask,
                     no_miss_success,
                     miss_event,
+                    intervention,
                 )
             )
     except BaseException:
@@ -90,6 +117,8 @@ class WorkerPool:
         frame_interval_s: float,
         seed: int,
         timeout_s: float,
+        regular_bullet_safety_horizon: int = 0,
+        regular_bullet_safety_margin: float = 0.0,
     ):
         context = mp.get_context("spawn")
         self.timeout_s = timeout_s
@@ -99,7 +128,14 @@ class WorkerPool:
             parent, child = context.Pipe()
             process = context.Process(
                 target=_worker_main,
-                args=(child, image, frame_interval_s, seed + worker_id),
+                args=(
+                    child,
+                    image,
+                    frame_interval_s,
+                    seed + worker_id,
+                    regular_bullet_safety_horizon,
+                    regular_bullet_safety_margin,
+                ),
                 daemon=True,
             )
             process.start()
@@ -109,6 +145,7 @@ class WorkerPool:
 
         observations = []
         action_masks = []
+        regular_bullet_interventions = []
         try:
             for worker_id, connection in enumerate(self.connections):
                 if not connection.poll(self.timeout_s):
@@ -120,16 +157,30 @@ class WorkerPool:
                     raise RuntimeError(f"worker {worker_id} failed:\n{message[1]}")
                 observations.append(message[1])
                 action_masks.append(message[2])
+                regular_bullet_interventions.append(message[3])
         except BaseException:
             self.close()
             raise
         self.observations = np.stack(observations).astype(np.float32, copy=False)
         self.action_masks = np.stack(action_masks).astype(np.bool_, copy=False)
+        self.regular_bullet_interventions = np.asarray(
+            regular_bullet_interventions, dtype=np.bool_
+        )
 
     def step(self, actions: np.ndarray):
         for connection, action in zip(self.connections, actions, strict=True):
             connection.send(("step", int(action)))
-        observations, rewards, dones, flags, action_masks, no_miss_successes, miss_events = (
+        (
+            observations,
+            rewards,
+            dones,
+            flags,
+            action_masks,
+            no_miss_successes,
+            miss_events,
+            regular_bullet_interventions,
+        ) = (
+            [],
             [],
             [],
             [],
@@ -155,6 +206,7 @@ class WorkerPool:
                 action_mask,
                 no_miss_success,
                 miss_event,
+                regular_bullet_intervention,
             ) = message
             observations.append(observation)
             rewards.append(reward)
@@ -163,8 +215,12 @@ class WorkerPool:
             action_masks.append(action_mask)
             no_miss_successes.append(no_miss_success)
             miss_events.append(miss_event)
+            regular_bullet_interventions.append(regular_bullet_intervention)
         self.observations = np.stack(observations).astype(np.float32, copy=False)
         self.action_masks = np.stack(action_masks).astype(np.bool_, copy=False)
+        self.regular_bullet_interventions = np.asarray(
+            regular_bullet_interventions, dtype=np.bool_
+        )
         return (
             self.observations,
             np.stack(rewards).astype(np.float32, copy=False),
@@ -357,6 +413,13 @@ def train(args: argparse.Namespace) -> None:
         raise ValueError("emergency-bomb-clearance must be non-negative")
     if args.emergency_bomb_horizon <= 0.0:
         raise ValueError("emergency-bomb-horizon must be positive")
+    if not 0 <= args.regular_bullet_safety_horizon <= 16:
+        raise ValueError("regular-bullet-safety-horizon must be between 0 and 16")
+    if (
+        not np.isfinite(args.regular_bullet_safety_margin)
+        or args.regular_bullet_safety_margin < 0.0
+    ):
+        raise ValueError("regular-bullet-safety-margin must be finite and non-negative")
     risk_horizons = tuple(args.future_miss_horizons)
     if any(horizon < 1 for horizon in risk_horizons):
         raise ValueError("future-miss-horizons must be positive")
@@ -433,6 +496,17 @@ def train(args: argparse.Namespace) -> None:
             args.emergency_bomb_horizon,
         ):
             raise ValueError("emergency bomb settings must match when resuming")
+        saved_regular_horizon = int(
+            resume_checkpoint.get("args", {}).get("regular_bullet_safety_horizon", 0)
+        )
+        saved_regular_margin = float(
+            resume_checkpoint.get("args", {}).get("regular_bullet_safety_margin", 0.0)
+        )
+        if (saved_regular_horizon, saved_regular_margin) != (
+            args.regular_bullet_safety_horizon,
+            args.regular_bullet_safety_margin,
+        ):
+            raise ValueError("regular bullet safety settings must match when resuming")
         saved_risk_enabled = resume_checkpoint.get("future_miss_head") is not None
         if saved_risk_enabled != risk_enabled:
             raise ValueError(
@@ -477,6 +551,8 @@ def train(args: argparse.Namespace) -> None:
         args.frame_interval,
         args.seed,
         args.worker_timeout,
+        args.regular_bullet_safety_horizon,
+        args.regular_bullet_safety_margin,
     )
     observation = pool.observations
     action_mask = pool.action_masks
@@ -522,6 +598,7 @@ def train(args: argparse.Namespace) -> None:
             )
             removed_probability_mass = 0.0
             emergency_bomb_interventions = 0
+            regular_bullet_interventions = 0
             successes = failures = no_miss_successes = 0
 
             model.eval()
@@ -530,8 +607,11 @@ def train(args: argparse.Namespace) -> None:
                 hidden_states[step] = hidden[0].numpy()
                 effective_action_mask = (
                     action_mask.copy()
-                    if args.hard_safety
+                    if args.hard_safety or args.regular_bullet_safety_horizon > 0
                     else np.ones_like(action_mask, dtype=np.bool_)
+                )
+                regular_bullet_interventions += int(
+                    np.count_nonzero(pool.regular_bullet_interventions)
                 )
                 if bomb_shield is not None:
                     effective_action_mask, interventions = bomb_shield.apply(
@@ -775,6 +855,9 @@ def train(args: argparse.Namespace) -> None:
                 "emergency_bomb_clearance": args.emergency_bomb_clearance,
                 "emergency_bomb_horizon": args.emergency_bomb_horizon,
                 "emergency_bomb_interventions": emergency_bomb_interventions,
+                "regular_bullet_safety_horizon": args.regular_bullet_safety_horizon,
+                "regular_bullet_safety_margin": args.regular_bullet_safety_margin,
+                "regular_bullet_interventions": regular_bullet_interventions,
                 "action_frequency": (
                     np.bincount(actions.reshape(-1), minlength=19) / actions.size
                 ).round(4).tolist(),
@@ -788,13 +871,17 @@ def train(args: argparse.Namespace) -> None:
                 "initialization": initialization,
                 "constrained_step_fraction": round(
                     float(np.mean(np.any(~action_masks, axis=-1)))
-                    if args.hard_safety or bomb_shield is not None
+                    if args.hard_safety
+                    or bomb_shield is not None
+                    or args.regular_bullet_safety_horizon > 0
                     else 0.0,
                     6,
                 ),
                 "removed_probability_mass": round(
                     removed_probability_mass / (args.rollout_steps * args.workers)
-                    if args.hard_safety or bomb_shield is not None
+                    if args.hard_safety
+                    or bomb_shield is not None
+                    or args.regular_bullet_safety_horizon > 0
                     else 0.0,
                     6,
                 ),
@@ -892,6 +979,18 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=6.0,
         help="constant-velocity prediction horizon in native game frames",
+    )
+    parser.add_argument(
+        "--regular-bullet-safety-horizon",
+        type=int,
+        default=0,
+        help="native-frame horizon for the audited regular-bullet action mask (0 disables)",
+    )
+    parser.add_argument(
+        "--regular-bullet-safety-margin",
+        type=float,
+        default=0.0,
+        help="extra pixels around ReC98's regular-bullet killbox",
     )
     parser.add_argument(
         "--objective-weights",

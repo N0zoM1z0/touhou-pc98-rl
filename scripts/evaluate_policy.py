@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from pc98rl.distributions import MaskedCategorical
 from pc98rl.env import TH05CPUEnv, TH05_KINEMATICS, describe_th05_scenario
 from pc98rl.heuristic import SafetyHeuristic
-from pc98rl.safety import EmergencyBombShield
+from pc98rl.safety import AuditedRegularBulletShield, EmergencyBombShield
 
 
 def evaluate(
@@ -31,6 +31,8 @@ def evaluate(
     hard_safety: bool | None = None,
     emergency_bomb_clearance: float | None = None,
     emergency_bomb_horizon: float | None = None,
+    regular_bullet_safety_horizon: int | None = None,
+    regular_bullet_safety_margin: float | None = None,
 ) -> dict:
     """Run one fixed-seed episode prefix and return JSON-serializable metrics."""
     rng = np.random.default_rng(seed)
@@ -63,6 +65,14 @@ def evaluate(
                 emergency_bomb_horizon = float(
                     saved.get("args", {}).get("emergency_bomb_horizon", 6.0)
                 )
+            if regular_bullet_safety_horizon is None:
+                regular_bullet_safety_horizon = int(
+                    saved.get("args", {}).get("regular_bullet_safety_horizon", 0)
+                )
+            if regular_bullet_safety_margin is None:
+                regular_bullet_safety_margin = float(
+                    saved.get("args", {}).get("regular_bullet_safety_margin", 0.0)
+                )
         torch.manual_seed(seed)
         model = EntityActorCritic(
             analytic_geometry=analytic_geometry,
@@ -77,6 +87,18 @@ def evaluate(
         emergency_bomb_clearance = 0.0
     if emergency_bomb_horizon is None:
         emergency_bomb_horizon = 6.0
+    if regular_bullet_safety_horizon is None:
+        regular_bullet_safety_horizon = 0
+    if regular_bullet_safety_margin is None:
+        regular_bullet_safety_margin = 0.0
+    regular_bullet_shield = (
+        AuditedRegularBulletShield(
+            horizon_frames=regular_bullet_safety_horizon,
+            extra_margin_px=regular_bullet_safety_margin,
+        )
+        if regular_bullet_safety_horizon > 0
+        else None
+    )
     bomb_shield = (
         EmergencyBombShield(
             TH05_KINEMATICS,
@@ -98,18 +120,25 @@ def evaluate(
     constrained_steps = 0
     removed_probability_mass = 0.0
     emergency_bomb_interventions = 0
+    regular_bullet_interventions = 0
     observation = np.zeros(env.observation_space.shape, dtype=np.float32)
     scenario = None
     try:
         observation, info = env.reset(seed=seed)
         scenario = describe_th05_scenario(observation)
         action_mask = info["action_mask"]
+        raw_frame = info["raw_frame"]
         for _ in range(steps):
             effective_action_mask = (
                 action_mask.copy()
-                if hard_safety
+                if hard_safety or regular_bullet_shield is not None
                 else np.ones_like(action_mask, dtype=np.bool_)
             )
+            if regular_bullet_shield is not None:
+                effective_action_mask, intervention = regular_bullet_shield.apply(
+                    raw_frame, effective_action_mask
+                )
+                regular_bullet_interventions += int(intervention)
             intervention = False
             if bomb_shield is not None:
                 effective_action_mask, intervention = bomb_shield.apply(
@@ -117,7 +146,11 @@ def evaluate(
                 )
                 emergency_bomb_interventions += int(intervention)
             if policy == "random":
-                if hard_safety or bomb_shield is not None:
+                if (
+                    hard_safety
+                    or bomb_shield is not None
+                    or regular_bullet_shield is not None
+                ):
                     valid_actions = np.flatnonzero(effective_action_mask)
                     action = int(rng.choice(valid_actions))
                     removed_probability_mass += 1.0 - len(valid_actions) / 19.0
@@ -136,7 +169,9 @@ def evaluate(
                         logits=logits,
                         valid_mask=(
                             torch.from_numpy(effective_action_mask).unsqueeze(0)
-                            if hard_safety or bomb_shield is not None
+                            if hard_safety
+                            or bomb_shield is not None
+                            or regular_bullet_shield is not None
                             else None
                         ),
                     )
@@ -151,6 +186,7 @@ def evaluate(
             action_counts[action] += 1
             observation, reward, terminal, truncated, info = env.step(action)
             action_mask = info["action_mask"]
+            raw_frame = info["raw_frame"]
             scalar_return += reward
             reward_vector += info["reward_vector"]
             deaths += int(info["miss_event"])
@@ -180,6 +216,9 @@ def evaluate(
         "emergency_bomb_clearance": emergency_bomb_clearance,
         "emergency_bomb_horizon": emergency_bomb_horizon,
         "emergency_bomb_interventions": emergency_bomb_interventions,
+        "regular_bullet_safety_horizon": regular_bullet_safety_horizon,
+        "regular_bullet_safety_margin": regular_bullet_safety_margin,
+        "regular_bullet_interventions": regular_bullet_interventions,
         "constrained_step_fraction": round(
             constrained_steps / completed_steps if completed_steps else 0.0, 6
         ),
@@ -209,6 +248,8 @@ def main() -> None:
     )
     parser.add_argument("--emergency-bomb-clearance", type=float, default=None)
     parser.add_argument("--emergency-bomb-horizon", type=float, default=None)
+    parser.add_argument("--regular-bullet-safety-horizon", type=int, default=None)
+    parser.add_argument("--regular-bullet-safety-margin", type=float, default=None)
     parser.add_argument("--steps", type=int, default=1_200)
     parser.add_argument("--seed", type=int, default=20260822)
     args = parser.parse_args()
@@ -223,6 +264,8 @@ def main() -> None:
         hard_safety=args.hard_safety,
         emergency_bomb_clearance=args.emergency_bomb_clearance,
         emergency_bomb_horizon=args.emergency_bomb_horizon,
+        regular_bullet_safety_horizon=args.regular_bullet_safety_horizon,
+        regular_bullet_safety_margin=args.regular_bullet_safety_margin,
     )
     print(json.dumps(result, sort_keys=True), flush=True)
 
