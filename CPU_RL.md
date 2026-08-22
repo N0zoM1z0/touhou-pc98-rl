@@ -310,13 +310,40 @@ no-miss clears, and deaths; a completion regression falsifies the proposed
 improvement. Exact selection and test reports are under `experiments/` with the
 `th05-lunatic-p2` prefix.
 
+### Auxiliary future-miss ablation: negative result
+
+The proposed auxiliary head was implemented with action-conditioned 15/30-step
+labels, episode-boundary truncation, rollout censoring, class-balanced BCE, and
+preserved policy-sampling RNG. A matched-budget pilot initialized both
+conditions from the selected phase 2-to-4 policy and trained each for 16,384
+transitions with seed 8088. The auxiliary coefficient was fixed at `0.05` before
+validation.
+
+Training totals were misleading: auxiliary training observed 51 deaths and 4
+failures versus 102 and 13 for plain PPO. Validation seeds 501--504 nevertheless
+selected update 4 for both conditions and strongly favored plain PPO. On
+untouched seeds 511--518, plain PPO cleared 8/8 with 14 deaths and mean return
+2.455; auxiliary PPO cleared 7/8 with 18 deaths and mean return 2.065. Both had
+zero no-miss clears. Auxiliary-minus-plain paired return was
+`-0.390 +/- 0.312` standard error.
+
+This rejects the current auxiliary mechanism. Vector GAE already propagates
+death rewards backward, while an on-policy future label is not counterfactual:
+it describes the outcome under the whole sampled future action sequence but
+does not identify a safer current action. Shared-encoder gradients can therefore
+distort completion features without adding actionable information. The next
+survival experiment must test an action-contrastive risk target or an explicit
+survival constraint over multiple training seeds, not merely tune this loss on
+the test set. Exact results are in
+`experiments/2026-08-22-th05-lunatic-auxiliary-ablation.json`.
+
 ## Next experiments
 
 The highest-value next work is:
 
-1. Compare matched-budget PPO against multi-horizon future-miss auxiliary
-   prediction on Stage 1 phase 2-to-4; reject it if completion or held-out
-   no-miss performance regresses.
+1. Replace the rejected on-policy future-miss representation loss with a
+   pre-registered action-contrastive risk or constrained-survival experiment;
+   use multiple training seeds and matched transitions.
 2. Implement a reset-aware sequence-block collector and verify its on-policy
    age bound before using its throughput result in algorithm comparisons.
 3. Add enemy tokens and evaluate the implemented time-to-collision features;

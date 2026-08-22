@@ -71,9 +71,9 @@ This project is organized around six falsifiable research questions.
 \end{description}
 
 The present evidence addresses RQ1 strongly, RQ2 at the systems level, and RQ3
-only preliminarily.  RQ4 has an underpowered comparative result.  RQ5 is
-motivated by the observed completion/no-miss gap but not yet tested.  RQ6 is
-deliberately deferred until the agent can complete TH05 on its highest
+only preliminarily.  RQ4 has an underpowered comparative result.  An initial
+RQ5 auxiliary mechanism is implemented and rejected by a held-out pilot.  RQ6
+is deliberately deferred until the agent can complete TH05 on its highest
 difficulty; only TH05 is currently validated.
 
 \section{Background and related work}
@@ -543,6 +543,49 @@ survival credit assignment.  Exact records are in
 \path{experiments/2026-08-22-th05-lunatic-p2-curriculum.json} and its linked raw
 selection and paired reports.
 
+\subsection{Sparse-miss auxiliary ablation}
+
+We tested the proposed training-only auxiliary target rather than assuming it
+was beneficial.  For each transition, a separate head predicts whether a miss
+is observed within 15 and 30 actions, conditioned on recurrent state and the
+sampled current action.  Windows stop at episode boundaries; unfinished
+rollout-boundary negatives are censored, while observed positives remain valid.
+The balanced binary loss has coefficient 0.05.  Future labels and the head are
+absent at inference.  Auxiliary-head initialization restores the PyTorch RNG
+state so it does not shift policy sampling before the first update.
+
+Plain and auxiliary PPO start from the same selected phase 2--4 checkpoint and
+each receive 16,384 transitions with training seed 8088.  Training totals seem
+to favor the auxiliary condition (51 versus 102 deaths and four versus thirteen
+failures), but these trajectories are not controlled because the game RNG is
+not seeded.  Common validation seeds 501--504 select update 4 in each condition.
+The plain candidate clears four of four with LCB 2.398; the auxiliary candidate
+clears three with LCB 0.915.
+
+\begin{table}[ht]
+  \centering
+  \caption{Untouched future-miss auxiliary test, seeds 511--518.}
+  \label{tab:auxiliary}
+  \begin{tabular}{lrrrr}
+    \toprule
+    Policy & Clears & No-miss & Deaths & Mean return \\
+    \midrule
+    Plain PPO & \textbf{8} & 0 & \textbf{14} & \textbf{2.455} \\
+    PPO + future-miss auxiliary & 7 & 0 & 18 & 2.065 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Auxiliary-minus-plain paired return is $-0.390$ with standard error 0.312.
+Table~\ref{tab:auxiliary} therefore rejects this instance of H4: supervision is
+denser, but completion and deaths both regress and no no-miss clear appears.
+Vector GAE already propagates a miss reward backward.  The auxiliary label is
+also not counterfactual: it records the outcome under an entire sampled future
+action sequence without identifying which alternative current action was safer.
+The lower training death count is thus not evidence of a better frozen policy.
+Machine-readable results are in
+\path{experiments/2026-08-22-th05-lunatic-auxiliary-ablation.json}.
+
 \section{Threats to validity}
 
 \begin{itemize}
@@ -585,13 +628,13 @@ When terminals become common, replace global synchronous waiting with an
 asynchronous collector or reset pool.  The prediction is improved wall-clock
 throughput without changing the on-policy age bound.
 
-\paragraph{H4: sparse-miss auxiliary credit.}
-For each on-policy transition, predict whether a miss occurs within 15 and 30
-future actions.  Mask samples whose horizon crosses an unfinished rollout
-boundary, stop gradients through labels, and expose no future information at
-inference.  Compare PPO and PPO plus the shared-encoder auxiliary loss at
-matched transitions.  The hypothesis is rejected if no-miss completion does
-not improve or ordinary completion regresses.
+\paragraph{H4: sparse-miss auxiliary credit (pilot rejected).}
+The tested on-policy 15/30-step prediction loss reduces neither held-out deaths
+nor completion failures.  Do not tune it on the reported test seeds.  A new
+pre-registered experiment must add actionable information---for example,
+action-contrastive short-horizon risk or an explicit survival constraint---and
+use multiple training seeds at matched transitions.  It is rejected if no-miss
+completion does not improve or ordinary completion regresses.
 
 \paragraph{H5: risk-aware objectives.}
 Compare the fixed scalarization with constrained or distributional survival
@@ -615,11 +658,13 @@ Native PC-98 RL is practical on a CPU when observation construction, process
 attachment, worker isolation, and thread scheduling are treated as first-class
 research concerns.  The present system removes a large dense-map bottleneck,
 runs eight independent games at useful speed, and exhibits small-data
-improvements in short-phase completion and survival.  The persistent gap
-between completion and no-miss completion motivates an auxiliary-credit
-ablation rather than a claim of mastery.  The main scientific task is to turn
-this systems baseline into a pre-registered multi-configuration study with
-full-stage completion metrics.
+improvements in short-phase completion and survival.  A future-miss auxiliary
+loss fails a held-out pilot, demonstrating that denser labels alone do not solve
+credit assignment.  The persistent gap between completion and no-miss
+completion motivates counterfactual or constrained survival learning rather
+than a claim of mastery.  The main scientific task is to turn this systems
+baseline into a pre-registered multi-configuration study with full-stage
+completion metrics.
 
 \bibliographystyle{plain}
 \bibliography{references}

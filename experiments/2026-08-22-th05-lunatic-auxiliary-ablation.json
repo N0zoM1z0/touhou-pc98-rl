@@ -1,0 +1,104 @@
+{
+  "date": "2026-08-22",
+  "scenario": {
+    "stage": 1,
+    "patch_stage_index": 0,
+    "phase": 2,
+    "end_phase": 4,
+    "rank": 3,
+    "character": 2,
+    "power": 128,
+    "lives": 3,
+    "bombs": 3
+  },
+  "common_training": {
+    "initialization": "models/curriculum/th05-s1-lunatic-p2-p4-selected.pt",
+    "initialization_sha256": "d8cc0e970bb60467eabd4bf7a85db349382747d2b1d57480c102783cd3b4b217",
+    "seed": 8088,
+    "updates": 8,
+    "workers": 8,
+    "rollout_steps": 256,
+    "transitions": 16384,
+    "learning_rate": 0.0003,
+    "entropy_coefficient": 0.02,
+    "epochs": 3
+  },
+  "auxiliary": {
+    "horizons": [15, 30],
+    "coefficient": 0.05,
+    "action_conditioned": true,
+    "episode_boundary_safe": true,
+    "unfinished_rollout_negatives_censored": true,
+    "class_balanced": true,
+    "inference_inputs": false,
+    "policy_rng_preserved_during_head_initialization": true
+  },
+  "training_observations": {
+    "plain": {
+      "successes": 8,
+      "no_miss_successes": 0,
+      "failures": 13,
+      "death_events": 102,
+      "mean_steps_per_s": 139.77875,
+      "wall_s": 163.416
+    },
+    "auxiliary": {
+      "successes": 6,
+      "no_miss_successes": 0,
+      "failures": 4,
+      "death_events": 51,
+      "mean_auxiliary_loss": 0.658954,
+      "mean_steps_per_s": 175.45875,
+      "wall_s": 113.444
+    },
+    "warning": "The internal game RNG is not controlled, so separate training trajectories are not exact pairs. Training event totals are not policy evaluation."
+  },
+  "validation": {
+    "seeds": [501, 502, 503, 504],
+    "steps": 1600,
+    "plain_selected": {
+      "update": 4,
+      "successes": 4,
+      "no_miss_successes": 0,
+      "mean_deaths": 1.75,
+      "mean_return": 2.56175,
+      "standard_error": 0.163276,
+      "selection_score": 2.398474
+    },
+    "auxiliary_selected": {
+      "update": 4,
+      "successes": 3,
+      "no_miss_successes": 0,
+      "mean_deaths": 2.5,
+      "mean_return": 1.622625,
+      "standard_error": 0.707326,
+      "selection_score": 0.915299
+    }
+  },
+  "test": {
+    "seeds": [511, 512, 513, 514, 515, 516, 517, 518],
+    "steps": 1600,
+    "plain": {
+      "successes": 8,
+      "no_miss_successes": 0,
+      "deaths": 14,
+      "mean_return": 2.454687,
+      "return_standard_error": 0.086398
+    },
+    "auxiliary": {
+      "successes": 7,
+      "no_miss_successes": 0,
+      "deaths": 18,
+      "mean_return": 2.064563,
+      "return_standard_error": 0.323615
+    },
+    "auxiliary_minus_plain_return": -0.390125,
+    "paired_standard_error": 0.311759
+  },
+  "raw_reports": [
+    "experiments/2026-08-22-th05-lunatic-aux-plain-selection.json",
+    "experiments/2026-08-22-th05-lunatic-aux-risk-selection.json",
+    "experiments/2026-08-22-th05-lunatic-auxiliary-test.json"
+  ],
+  "conclusion": "Reject this auxiliary mechanism. It adds dense but non-counterfactual on-policy labels, regresses held-out completion and deaths, and produces no no-miss clear."
+}

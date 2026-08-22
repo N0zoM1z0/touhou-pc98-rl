@@ -1,0 +1,477 @@
+{
+  "candidates": [
+    {
+      "evaluations": [
+        {
+          "action_counts": [
+            42,
+            43,
+            38,
+            46,
+            67,
+            28,
+            60,
+            40,
+            96,
+            45,
+            18,
+            41,
+            80,
+            54,
+            71,
+            49,
+            44,
+            15,
+            20
+          ],
+          "analytic_geometry": true,
+          "constrained_step_fraction": 0.661093,
+          "death_events": 1,
+          "elapsed_s": 36.44,
+          "end_flag": 2,
+          "final_xy": [
+            0.49900001287460327,
+            0.9934999942779541
+          ],
+          "hard_safety": true,
+          "no_miss_success": false,
+          "policy": "checkpoint",
+          "raw_reward": [
+            139.7,
+            2037.0,
+            -165.0
+          ],
+          "removed_probability_mass": 0.140766,
+          "scalar_return": 3.0215,
+          "scenario": {
+            "character": 2,
+            "configured_bombs": 3,
+            "configured_lives": 3,
+            "initial_power": 128,
+            "patch_stage_index": 0,
+            "rank": 3,
+            "stage": 1
+          },
+          "seed": 501,
+          "steps": 897,
+          "success": true,
+          "terminal": true
+        },
+        {
+          "action_counts": [
+            45,
+            50,
+            58,
+            37,
+            73,
+            31,
+            60,
+            40,
+            91,
+            47,
+            24,
+            35,
+            94,
+            50,
+            58,
+            46,
+            31,
+            18,
+            32
+          ],
+          "analytic_geometry": true,
+          "constrained_step_fraction": 0.508696,
+          "death_events": 2,
+          "elapsed_s": 37.264,
+          "end_flag": 2,
+          "final_xy": [
+            0.572700023651123,
+            0.9397000074386597
+          ],
+          "hard_safety": true,
+          "no_miss_success": false,
+          "policy": "checkpoint",
+          "raw_reward": [
+            92.0,
+            2040.0,
+            -238.0
+          ],
+          "removed_probability_mass": 0.104126,
+          "scalar_return": 2.365,
+          "scenario": {
+            "character": 2,
+            "configured_bombs": 3,
+            "configured_lives": 3,
+            "initial_power": 128,
+            "patch_stage_index": 0,
+            "rank": 3,
+            "stage": 1
+          },
+          "seed": 502,
+          "steps": 920,
+          "success": true,
+          "terminal": true
+        },
+        {
+          "action_counts": [
+            64,
+            78,
+            55,
+            50,
+            87,
+            38,
+            69,
+            41,
+            94,
+            59,
+            26,
+            50,
+            111,
+            70,
+            71,
+            70,
+            37,
+            21,
+            37
+          ],
+          "analytic_geometry": true,
+          "constrained_step_fraction": 0.611702,
+          "death_events": 2,
+          "elapsed_s": 44.767,
+          "end_flag": 2,
+          "final_xy": [
+            0.49390000104904175,
+            1.0
+          ],
+          "hard_safety": true,
+          "no_miss_success": false,
+          "policy": "checkpoint",
+          "raw_reward": [
+            112.8,
+            2045.0,
+            -244.0
+          ],
+          "removed_probability_mass": 0.107571,
+          "scalar_return": 2.563,
+          "scenario": {
+            "character": 2,
+            "configured_bombs": 3,
+            "configured_lives": 3,
+            "initial_power": 128,
+            "patch_stage_index": 0,
+            "rank": 3,
+            "stage": 1
+          },
+          "seed": 503,
+          "steps": 1128,
+          "success": true,
+          "terminal": true
+        },
+        {
+          "action_counts": [
+            30,
+            38,
+            43,
+            36,
+            56,
+            34,
+            57,
+            35,
+            75,
+            55,
+            25,
+            39,
+            69,
+            59,
+            61,
+            54,
+            29,
+            28,
+            31
+          ],
+          "analytic_geometry": true,
+          "constrained_step_fraction": 0.422717,
+          "death_events": 2,
+          "elapsed_s": 34.894,
+          "end_flag": 2,
+          "final_xy": [
+            0.5699999928474426,
+            0.878600001335144
+          ],
+          "hard_safety": true,
+          "no_miss_success": false,
+          "policy": "checkpoint",
+          "raw_reward": [
+            85.4,
+            2041.0,
+            -239.0
+          ],
+          "removed_probability_mass": 0.059062,
+          "scalar_return": 2.2975,
+          "scenario": {
+            "character": 2,
+            "configured_bombs": 3,
+            "configured_lives": 3,
+            "initial_power": 128,
+            "patch_stage_index": 0,
+            "rank": 3,
+            "stage": 1
+          },
+          "seed": 504,
+          "steps": 854,
+          "success": true,
+          "terminal": true
+        }
+      ],
+      "mean_deaths": 1.75,
+      "mean_return": 2.56175,
+      "no_miss_successes": 0,
+      "selection_score": 2.398474,
+      "snapshot": "/home/yann/yann/touhou/touhou-1-5-rl/models/auxiliary-ablation/plain-seed8088/update_000004.pt",
+      "standard_error": 0.163276,
+      "successes": 4
+    },
+    {
+      "evaluations": [
+        {
+          "action_counts": [
+            39,
+            36,
+            38,
+            41,
+            61,
+            35,
+            67,
+            38,
+            90,
+            28,
+            23,
+            34,
+            70,
+            63,
+            65,
+            56,
+            33,
+            26,
+            36
+          ],
+          "analytic_geometry": true,
+          "constrained_step_fraction": 0.488055,
+          "death_events": 2,
+          "elapsed_s": 35.836,
+          "end_flag": 2,
+          "final_xy": [
+            0.5685999989509583,
+            0.8313999772071838
+          ],
+          "hard_safety": true,
+          "no_miss_success": false,
+          "policy": "checkpoint",
+          "raw_reward": [
+            87.9,
+            2040.0,
+            -209.0
+          ],
+          "removed_probability_mass": 0.05993,
+          "scalar_return": 2.3965,
+          "scenario": {
+            "character": 2,
+            "configured_bombs": 3,
+            "configured_lives": 3,
+            "initial_power": 128,
+            "patch_stage_index": 0,
+            "rank": 3,
+            "stage": 1
+          },
+          "seed": 501,
+          "steps": 879,
+          "success": true,
+          "terminal": true
+        },
+        {
+          "action_counts": [
+            45,
+            42,
+            57,
+            36,
+            58,
+            33,
+            61,
+            39,
+            64,
+            33,
+            15,
+            35,
+            71,
+            55,
+            52,
+            38,
+            27,
+            24,
+            30
+          ],
+          "analytic_geometry": true,
+          "constrained_step_fraction": 0.49816,
+          "death_events": 2,
+          "elapsed_s": 33.483,
+          "end_flag": 2,
+          "final_xy": [
+            0.5831999778747559,
+            0.9726999998092651
+          ],
+          "hard_safety": true,
+          "no_miss_success": false,
+          "policy": "checkpoint",
+          "raw_reward": [
+            81.5,
+            2035.0,
+            -239.0
+          ],
+          "removed_probability_mass": 0.076118,
+          "scalar_return": 2.2525,
+          "scenario": {
+            "character": 2,
+            "configured_bombs": 3,
+            "configured_lives": 3,
+            "initial_power": 128,
+            "patch_stage_index": 0,
+            "rank": 3,
+            "stage": 1
+          },
+          "seed": 502,
+          "steps": 815,
+          "success": true,
+          "terminal": true
+        },
+        {
+          "action_counts": [
+            59,
+            62,
+            51,
+            51,
+            71,
+            35,
+            82,
+            37,
+            70,
+            36,
+            22,
+            45,
+            87,
+            77,
+            63,
+            49,
+            37,
+            32,
+            36
+          ],
+          "analytic_geometry": true,
+          "constrained_step_fraction": 0.582834,
+          "death_events": 2,
+          "elapsed_s": 40.222,
+          "end_flag": 2,
+          "final_xy": [
+            0.5067999958992004,
+            0.9970999956130981
+          ],
+          "hard_safety": true,
+          "no_miss_success": false,
+          "policy": "checkpoint",
+          "raw_reward": [
+            100.2,
+            2052.0,
+            -237.0
+          ],
+          "removed_probability_mass": 0.056581,
+          "scalar_return": 2.4615,
+          "scenario": {
+            "character": 2,
+            "configured_bombs": 3,
+            "configured_lives": 3,
+            "initial_power": 128,
+            "patch_stage_index": 0,
+            "rank": 3,
+            "stage": 1
+          },
+          "seed": 503,
+          "steps": 1002,
+          "success": true,
+          "terminal": true
+        },
+        {
+          "action_counts": [
+            29,
+            39,
+            46,
+            43,
+            48,
+            39,
+            64,
+            37,
+            73,
+            51,
+            18,
+            41,
+            64,
+            68,
+            64,
+            47,
+            27,
+            28,
+            30
+          ],
+          "analytic_geometry": true,
+          "constrained_step_fraction": 0.40771,
+          "death_events": 4,
+          "elapsed_s": 34.965,
+          "end_flag": 1,
+          "final_xy": [
+            0.5,
+            1.0
+          ],
+          "hard_safety": true,
+          "no_miss_success": false,
+          "policy": "checkpoint",
+          "raw_reward": [
+            -164.4,
+            1737.0,
+            -241.0
+          ],
+          "removed_probability_mass": 0.050175,
+          "scalar_return": -0.5095,
+          "scenario": {
+            "character": 2,
+            "configured_bombs": 3,
+            "configured_lives": 3,
+            "initial_power": 128,
+            "patch_stage_index": 0,
+            "rank": 3,
+            "stage": 1
+          },
+          "seed": 504,
+          "steps": 856,
+          "success": false,
+          "terminal": true
+        }
+      ],
+      "mean_deaths": 2.5,
+      "mean_return": 1.65025,
+      "no_miss_successes": 0,
+      "selection_score": 0.92901,
+      "snapshot": "/home/yann/yann/touhou/touhou-1-5-rl/models/auxiliary-ablation/plain-seed8088/update_000008.pt",
+      "standard_error": 0.72124,
+      "successes": 3
+    }
+  ],
+  "deterministic": false,
+  "jobs": 4,
+  "lcb_z": 1.0,
+  "seeds": [
+    501,
+    502,
+    503,
+    504
+  ],
+  "selected": "/home/yann/yann/touhou/touhou-1-5-rl/models/auxiliary-ablation/plain-seed8088/update_000004.pt",
+  "steps": 1600
+}
