@@ -61,9 +61,9 @@ This project is organized around six falsifiable research questions.
   \item[RQ4: Safe exploration.] Do adapter-certified hard action constraints
   improve sample efficiency without merely hiding an unsafe policy?
 
-  \item[RQ5: Sparse survival credit.] Can training-only auxiliary targets spread
-  a rare miss signal backward in time without sacrificing task completion or
-  injecting a scripted dodge policy?
+  \item[RQ5: Sparse survival credit.] Can auxiliary targets or explicit
+  miss costs improve no-miss completion without sacrificing ordinary task
+  completion or injecting a scripted dodge policy?
 
   \item[RQ6: Generality.] Which interfaces can be shared by Touhou 1--5, and
   which memory, termination, reward, and patching components must remain
@@ -72,9 +72,10 @@ This project is organized around six falsifiable research questions.
 
 The present evidence addresses RQ1 strongly, RQ2 at the systems level, and RQ3
 only preliminarily.  RQ4 has an underpowered comparative result.  An initial
-RQ5 auxiliary mechanism is implemented and rejected by a held-out pilot.  RQ6
-is deliberately deferred until the agent can complete TH05 on its highest
-difficulty; only TH05 is currently validated.
+RQ5 auxiliary mechanism is rejected by a held-out pilot; a subsequent explicit
+miss-cost pilot improves the completion point estimate but produces no no-miss
+clear.  RQ6 is deliberately deferred until the agent can complete TH05 on its
+highest difficulty; only TH05 is currently validated.
 
 \section{Background and related work}
 
@@ -586,6 +587,53 @@ The lower training death count is thus not evidence of a better frozen policy.
 Machine-readable results are in
 \path{experiments/2026-08-22-th05-lunatic-auxiliary-ablation.json}.
 
+\subsection{Explicit miss cost and deployment ablation}
+
+The survival reward originally combined a $+1$ scaled terminal clear, a
+$-0.5$ miss, terminal failure, and per-step survival in one critic component.
+Changing its scalarization weight cannot change the ordering within that
+component.  We therefore detect a miss directly from the resident miss counter
+and add a configurable miss-only cost after collection.  A cost of 2.0 makes a
+single miss larger than the completion bonus while retaining the old model
+architecture and weights.
+
+Starting from the selected phase 2--4 checkpoint, one seed receives 32,768
+transitions at learning rate $10^{-4}$ and entropy coefficient 0.005.
+Validation seeds 621--624 select update 4, which clears four of four but has no
+no-miss clear.  Later updates regress, again validating immutable snapshots.
+
+\begin{table}[ht]
+  \centering
+  \caption{Explicit miss-cost pilot on untouched stochastic seeds 631--638.}
+  \label{tab:miss-cost}
+  \begin{tabular}{lrrrr}
+    \toprule
+    Policy & Clears & No-miss & Misses & Mean return \\
+    \midrule
+    Curriculum initializer & 5 & 0 & 18 & 1.403 \\
+    Extra miss cost, update 4 & \textbf{7} & 0 & \textbf{16} & \textbf{2.099} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The paired return gain is $0.696\pm0.780$ standard error.  This favors phase
+completion but does not solve the target metric: neither policy achieves a
+no-miss clear.  Raw argmax deployment is not a remedy.  On separate seeds
+641--648, both policies fail 0/8 and incur 24 misses.  Their categorical
+movement distributions are multimodal; repeatedly taking one marginal mode
+collapses useful stochastic direction switching into a few repeated actions.
+
+We also implemented a policy-accounted emergency-bomb mask: it activates only
+with remaining bombs, a vulnerable player, and a short predicted close
+approach.  A four-seed calibration produces no no-miss clear and is confounded
+by uncontrolled game RNG.  The approximate geometry omits bullet activation
+state and replaces TH05's projectile-specific square collision boxes with one
+Euclidean threshold.  We therefore retain the mechanism but do not accept its
+pilot as evidence.  The next shield must follow audited native collision rules
+and mask unsafe movement actions before falling back to a bomb.  Exact pilot
+values are in
+\path{experiments/2026-08-22-th05-lunatic-explicit-miss-cost.json}.
+
 \section{Threats to validity}
 
 \begin{itemize}
@@ -628,13 +676,17 @@ When terminals become common, replace global synchronous waiting with an
 asynchronous collector or reset pool.  The prediction is improved wall-clock
 throughput without changing the on-policy age bound.
 
-\paragraph{H4: sparse-miss auxiliary credit (pilot rejected).}
+\paragraph{H4: sparse-miss credit (two incomplete pilots).}
 The tested on-policy 15/30-step prediction loss reduces neither held-out deaths
 nor completion failures.  Do not tune it on the reported test seeds.  A new
 pre-registered experiment must add actionable information---for example,
 action-contrastive short-horizon risk or an explicit survival constraint---and
 use multiple training seeds at matched transitions.  It is rejected if no-miss
 completion does not improve or ordinary completion regresses.
+
+An explicit miss-only cost improves the completion point estimate from 5/8 to
+7/8 but yields zero no-miss clears in both conditions.  It remains available as
+an objective option, but is not sufficient evidence for H4.
 
 \paragraph{H5: risk-aware objectives.}
 Compare the fixed scalarization with constrained or distributional survival
@@ -643,8 +695,10 @@ survival regression behind score gain.
 
 \paragraph{H6: adapter-certified safety.}
 Compare no mask, exact resource/boundary constraints, and any future predictive
-shield at matched training budgets.  Report removed policy probability mass
-and evaluate every trained policy both with and without its shield.
+shield at matched training budgets.  Predictive masks must encode audited
+bullet activation and projectile-specific collision boxes, not a single
+nearest-object distance.  Report removed policy probability mass and evaluate
+every trained policy both with and without its shield.
 
 \paragraph{H7: old-five-games interface.}
 Define per-game contracts for observation schema, action meaning, terminal
@@ -659,10 +713,10 @@ attachment, worker isolation, and thread scheduling are treated as first-class
 research concerns.  The present system removes a large dense-map bottleneck,
 runs eight independent games at useful speed, and exhibits small-data
 improvements in short-phase completion and survival.  A future-miss auxiliary
-loss fails a held-out pilot, demonstrating that denser labels alone do not solve
-credit assignment.  The persistent gap between completion and no-miss
-completion motivates counterfactual or constrained survival learning rather
-than a claim of mastery.  The main scientific task is to turn this systems
+loss fails a held-out pilot, and an explicit miss cost improves ordinary
+completion without producing a no-miss clear.  The persistent gap motivates
+action-level audited safety and constrained survival learning rather than a
+claim of mastery.  The main scientific task is to turn this systems
 baseline into a pre-registered multi-configuration study with full-stage
 completion metrics.
 

@@ -1,0 +1,100 @@
+{
+  "date": "2026-08-22",
+  "scenario": {
+    "stage": 1,
+    "patch_stage_index": 0,
+    "phase": 2,
+    "end_phase": 4,
+    "rank": 3,
+    "character": 2,
+    "power": 128,
+    "lives": 3,
+    "bombs": 3
+  },
+  "mechanism": {
+    "resident_miss_counter_event": true,
+    "extra_scaled_survival_cost_per_miss": 2.0,
+    "checkpoint_architecture_changed": false,
+    "motivation": "Completion, per-step survival, and miss penalties previously shared one reward component, so objective weighting could not make a miss lexicographically worse than a clear."
+  },
+  "training": {
+    "initialization": "models/curriculum/th05-s1-lunatic-p2-p4-selected.pt",
+    "initialization_sha256": "d8cc0e970bb60467eabd4bf7a85db349382747d2b1d57480c102783cd3b4b217",
+    "seed": 9191,
+    "updates": 16,
+    "workers": 8,
+    "rollout_steps": 256,
+    "transitions": 32768,
+    "learning_rate": 0.0001,
+    "entropy_coefficient": 0.005,
+    "epochs": 4,
+    "observed_successes": 13,
+    "observed_no_miss_successes": 0,
+    "observed_failures": 16,
+    "observed_misses": 141,
+    "wall_s": 269.15,
+    "mean_steps_per_s": 150.90625
+  },
+  "validation": {
+    "seeds": [621, 622, 623, 624],
+    "steps": 1600,
+    "selected_update": 4,
+    "selected_sha256": "9b87ffaef8baf293bf1ce6de36be5a141066b37c42ed953ecbd73675ff146bfc",
+    "selected": {
+      "successes": 4,
+      "no_miss_successes": 0,
+      "mean_deaths": 1.75,
+      "mean_return": 2.59125,
+      "standard_error": 0.186721,
+      "selection_score": 2.404529
+    },
+    "later_regression": "Updates 8 and 16 cleared only 2/4 and 3/4 respectively; update 12 cleared 4/4 but had more deaths and a lower return LCB."
+  },
+  "untouched_stochastic_test": {
+    "seeds": [631, 632, 633, 634, 635, 636, 637, 638],
+    "steps": 1600,
+    "baseline": {
+      "successes": 5,
+      "no_miss_successes": 0,
+      "deaths": 18,
+      "mean_return": 1.402875,
+      "return_standard_error": 0.561379
+    },
+    "extra_miss_cost": {
+      "successes": 7,
+      "no_miss_successes": 0,
+      "deaths": 16,
+      "mean_return": 2.09875,
+      "return_standard_error": 0.410737
+    },
+    "paired_return_gain": 0.695875,
+    "paired_standard_error": 0.779995
+  },
+  "deterministic_argmax_test": {
+    "seeds": [641, 642, 643, 644, 645, 646, 647, 648],
+    "steps": 1600,
+    "baseline": {
+      "successes": 0,
+      "no_miss_successes": 0,
+      "deaths": 24,
+      "mean_return": -1.754936
+    },
+    "extra_miss_cost": {
+      "successes": 0,
+      "no_miss_successes": 0,
+      "deaths": 24,
+      "mean_return": -2.08986
+    },
+    "paired_return_gain": -0.334924,
+    "paired_standard_error": 0.127608,
+    "conclusion": "Reject argmax deployment for the current categorical policy; its multimodal movement distribution collapses to a few repeated actions."
+  },
+  "emergency_bomb_smoke": {
+    "warning": "The game RNG is uncontrolled and the four-run conditions are not exact trajectory pairs; these values do not establish an effect.",
+    "seeds": [611, 612, 613, 614],
+    "baseline": {"successes": 3, "no_miss_successes": 0, "deaths": 8, "mean_return": 1.72725, "interventions": 0},
+    "clearance_10_horizon_6": {"successes": 4, "no_miss_successes": 0, "deaths": 7, "mean_return": 2.58225, "interventions": 5},
+    "clearance_18_horizon_8": {"successes": 3, "no_miss_successes": 0, "deaths": 9, "mean_return": 1.84125, "interventions": 11}
+  },
+  "conclusion": "The explicit miss cost improves the completion point estimate but does not produce a no-miss clear. It is retained as a compatible objective option, not accepted as the solution to perfect play. Exact action-level collision constraints are the next priority."
+}

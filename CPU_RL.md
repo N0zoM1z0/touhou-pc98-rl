@@ -337,20 +337,61 @@ survival constraint over multiple training seeds, not merely tune this loss on
 the test set. Exact results are in
 `experiments/2026-08-22-th05-lunatic-auxiliary-ablation.json`.
 
+### Explicit miss cost and deployment-policy result
+
+The native reward originally combined terminal success, terminal failure,
+per-step survival, and a miss in one survival component. Merely increasing its
+objective weight therefore could not make one miss lexicographically worse than
+one clear. The environment now detects misses from the resident miss counter,
+rather than inferring them from a negative reward, and PPO can add an explicit
+scaled cost with `--extra-miss-penalty` without changing the three-head model or
+invalidating existing policy weights.
+
+A phase 2-to-4 fine-tune initialized from the selected curriculum checkpoint,
+used penalty `2.0`, seed 9191, and 32,768 transitions. Validation seeds 621--624
+selected update 4: 4/4 clears, zero no-miss clears, 1.75 mean deaths, and return
+LCB 2.405. Updates 8 and 16 already regressed to 2/4 and 3/4 clears.
+
+On untouched stochastic seeds 631--638, the initializer achieved 5/8 clears,
+18 misses, and mean return 1.403. The selected miss-cost policy achieved 7/8
+clears, 16 misses, and mean return 2.099. Its paired return gain was
+`+0.696 +/- 0.780` standard error. Both remained at 0/8 no-miss, so this is at
+most a completion improvement and does not validate the intended perfect-play
+mechanism.
+
+Deterministic argmax deployment was decisively worse: both checkpoints failed
+all eight seeds and exhausted all three lives in every run. The categorical
+policy represents useful motion with several competing direction modes; taking
+one mode at every step collapses that mixture into a few repeated actions.
+Training exploration and deployment cannot therefore be separated with a raw
+argmax rule for this architecture.
+
+An optional last-resort bomb shield is also implemented as a policy-accounted
+action mask. It only intervenes when resources remain, the player is vulnerable,
+and constant-velocity geometry predicts a short-horizon close approach. A
+four-seed calibration was inconclusive and produced no no-miss clear; 10 px / 6
+frames had 4/4 clears and seven misses versus 3/4 and eight for no shield, while
+18 px / 8 frames had 3/4 and nine. Because TH05's actual collision logic uses
+square, projectile-specific hitboxes and bullet activation states, these
+numbers justify auditing exact native collision semantics rather than widening
+the approximate threshold. Full values are tracked in
+`experiments/2026-08-22-th05-lunatic-explicit-miss-cost.json`.
+
 ## Next experiments
 
 The highest-value next work is:
 
-1. Replace the rejected on-policy future-miss representation loss with a
-   pre-registered action-contrastive risk or constrained-survival experiment;
-   use multiple training seeds and matched transitions.
+1. Add action-level masks derived from audited TH05 collision boxes, bullet
+   activation states, and per-character movement; compare them with the
+   approximate bomb-only shield before advancing the curriculum.
 2. Implement a reset-aware sequence-block collector and verify its on-policy
    age bound before using its throughput result in algorithm comparisons.
 3. Add enemy tokens and evaluate the implemented time-to-collision features;
    the current 273-float schema
    includes nearest bullets/special projectiles but not a compact enemy set.
-4. Reduce starting power/resources and expand from Stage 1 phases to full-stage
-   and later full-game completion, always measuring completion first.
+4. Expand backward from Stage 1 phase 2 only after a held-out no-miss clear,
+   then reduce starting power/resources and advance to full-stage/full-game
+   completion.
 5. Implement TH01-04 adapters behind the same Gymnasium interface and add
    per-game contract tests before claiming full old-five-games support.
 

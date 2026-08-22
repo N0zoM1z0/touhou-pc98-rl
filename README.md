@@ -20,6 +20,8 @@ training/evaluation path is designed around reproducible CPU experiments.
   multi-seed lower-confidence-bound checkpoint selection.
 - Optional analytic relative-motion features and adapter-certified hard action
   masks applied consistently during rollout and optimization.
+- Resident-counter miss events, an explicit miss-only training cost, and an
+  experimental policy-accounted emergency-bomb mask.
 - Eight-emulator CPU rollout at about 223 transitions/s on this host.
 
 TH01-04 are explicitly not claimed yet. The immediate target is TH05 Lunatic
