@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import multiprocessing as mp
 import os
@@ -202,6 +203,29 @@ def _as_sequences(array: np.ndarray, sequence_length: int) -> np.ndarray:
     )
 
 
+def _apply_checkpoint(
+    model: nn.Module,
+    optimizer: torch.optim.Optimizer,
+    checkpoint: dict,
+    *,
+    resume: bool,
+) -> tuple[int, int]:
+    """Load policy weights, optionally restoring same-run optimizer state."""
+    model.load_state_dict(checkpoint["model"])
+    if not resume:
+        return 0, 0
+    optimizer.load_state_dict(checkpoint["optimizer"])
+    return int(checkpoint["update"]), int(checkpoint["environment_steps"])
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as file:
+        for chunk in iter(lambda: file.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def train(args: argparse.Namespace) -> None:
     if args.rollout_steps % args.sequence_length:
         raise ValueError("rollout-steps must be divisible by sequence-length")
@@ -220,12 +244,39 @@ def train(args: argparse.Namespace) -> None:
     first_update = 0
     environment_steps = 0
     resume_checkpoint = None
-    if args.resume and checkpoint_path.exists():
+    initialization_checkpoint = None
+    initialization = None
+    if args.resume:
+        if not checkpoint_path.is_file():
+            raise FileNotFoundError(
+                f"cannot resume because checkpoint does not exist: {checkpoint_path}"
+            )
         resume_checkpoint = torch.load(
             checkpoint_path, map_location="cpu", weights_only=False
         )
+    elif args.initialize_from:
+        initialization_path = Path(args.initialize_from)
+        if not initialization_path.is_file():
+            raise FileNotFoundError(
+                f"initialization checkpoint does not exist: {initialization_path}"
+            )
+        initialization_checkpoint = torch.load(
+            initialization_path, map_location="cpu", weights_only=False
+        )
+        initialization = {
+            "path": str(initialization_path.resolve()),
+            "sha256": _sha256_file(initialization_path),
+            "source_update": int(initialization_checkpoint.get("update", 0)),
+            "source_environment_steps": int(
+                initialization_checkpoint.get("environment_steps", 0)
+            ),
+            "source_scenario": initialization_checkpoint.get("scenario"),
+        }
+
+    source_checkpoint = resume_checkpoint or initialization_checkpoint
+    if source_checkpoint is not None:
         saved_geometry = bool(
-            resume_checkpoint.get("args", {}).get("analytic_geometry", False)
+            source_checkpoint.get("args", {}).get("analytic_geometry", False)
         )
         if saved_geometry != args.analytic_geometry:
             raise ValueError(
@@ -238,10 +289,11 @@ def train(args: argparse.Namespace) -> None:
     ).cpu()
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate, eps=1e-5)
     if resume_checkpoint is not None:
-        model.load_state_dict(resume_checkpoint["model"])
-        optimizer.load_state_dict(resume_checkpoint["optimizer"])
-        first_update = int(resume_checkpoint["update"])
-        environment_steps = int(resume_checkpoint["environment_steps"])
+        first_update, environment_steps = _apply_checkpoint(
+            model, optimizer, resume_checkpoint, resume=True
+        )
+    elif initialization_checkpoint is not None:
+        _apply_checkpoint(model, optimizer, initialization_checkpoint, resume=False)
 
     pool = WorkerPool(
         args.image,
@@ -463,6 +515,7 @@ def train(args: argparse.Namespace) -> None:
                 "analytic_geometry": args.analytic_geometry,
                 "hard_safety": args.hard_safety,
                 "scenario": scenario,
+                "initialization": initialization,
                 "constrained_step_fraction": round(
                     float(np.mean(np.any(~action_masks, axis=-1)))
                     if args.hard_safety
@@ -487,6 +540,7 @@ def train(args: argparse.Namespace) -> None:
                 "environment_steps": environment_steps,
                 "args": vars(args),
                 "scenario": scenario,
+                "initialization": initialization,
             }
             torch.save(checkpoint, checkpoint_path)
             if args.snapshot_every and (update + 1) % args.snapshot_every == 0:
@@ -542,7 +596,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--metrics", default="runs/pc98rl/metrics.jsonl")
     parser.add_argument("--snapshot-dir", default="models/pc98rl_snapshots")
     parser.add_argument("--snapshot-every", type=int, default=1)
-    parser.add_argument("--resume", action="store_true")
+    continuation = parser.add_mutually_exclusive_group()
+    continuation.add_argument(
+        "--resume",
+        action="store_true",
+        help="continue the same run, including optimizer and counters",
+    )
+    continuation.add_argument(
+        "--initialize-from",
+        help="start a new run from policy weights only; reset optimizer and counters",
+    )
     return parser.parse_args()
 
 
