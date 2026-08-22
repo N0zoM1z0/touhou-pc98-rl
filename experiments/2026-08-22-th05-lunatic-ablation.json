@@ -1,0 +1,98 @@
+{
+  "date": "2026-08-22",
+  "question": "Does analytic collision geometry plus adapter-certified hard safety outperform the compact recurrent PPO baseline on TH05 Lunatic?",
+  "scenario": {
+    "stage": 2,
+    "patch_stage_index": 1,
+    "phase": 0,
+    "end_phase": 0,
+    "rank": 3,
+    "character": 2,
+    "configured_power": 0,
+    "observed_initial_power": 1,
+    "configured_lives": 3,
+    "configured_bombs": 3,
+    "note": "The run was initially named Stage 1 by following the patch README. Source audit proved that resident stage indices are zero-based, so the retained measurements are relabelled Stage 2."
+  },
+  "training": {
+    "conditions": {
+      "plain": {
+        "analytic_geometry": false,
+        "hard_safety": false
+      },
+      "geometry_safety": {
+        "analytic_geometry": true,
+        "hard_safety": true
+      }
+    },
+    "seeds": [1011, 2022, 3033],
+    "updates_per_seed": 12,
+    "transitions_per_update": 2048,
+    "transitions_per_seed": 24576,
+    "workers": 8,
+    "snapshot_updates": [4, 8, 12],
+    "stage_successes": 0
+  },
+  "validation": {
+    "seeds": [71, 72, 73],
+    "steps_per_evaluation": 1200,
+    "candidates_per_condition": 9,
+    "selection_rule": "success count, then mean return minus one standard error",
+    "plain_selected": {
+      "training_seed": 3033,
+      "update": 8,
+      "mean_return": -0.856333,
+      "standard_error": 0.592543,
+      "selection_score": -1.448877,
+      "mean_deaths": 2.6667,
+      "successes": 0
+    },
+    "geometry_safety_selected": {
+      "training_seed": 2022,
+      "update": 8,
+      "mean_return": -0.822,
+      "standard_error": 0.599782,
+      "selection_score": -1.421782,
+      "mean_deaths": 2.6667,
+      "successes": 0
+    }
+  },
+  "untouched_test": {
+    "seeds": [81, 82, 83, 84],
+    "steps_per_evaluation": 1200,
+    "plain_returns": [-2.201, -2.0565, -2.0295, -0.3055],
+    "geometry_safety_returns": [0.3895, -2.155, -2.253, -0.197],
+    "paired_return_differences": [2.5905, -0.0985, -0.2235, 0.1085],
+    "plain_mean_return": -1.648125,
+    "geometry_safety_mean_return": -1.053875,
+    "paired_mean_gain": 0.59425,
+    "paired_gain_standard_error": 0.668929,
+    "plain_total_deaths": 14,
+    "geometry_safety_total_deaths": 11,
+    "plain_successes": 0,
+    "geometry_safety_successes": 0,
+    "geometry_safety_mean_constrained_step_fraction": 0.400694,
+    "geometry_safety_mean_removed_probability_mass": 0.024651
+  },
+  "curriculum_probe": {
+    "scenario": {
+      "stage": 1,
+      "patch_stage_index": 0,
+      "phase": 3,
+      "end_phase": 4,
+      "rank": 3,
+      "character": 2,
+      "power": 128,
+      "lives": 3,
+      "bombs": 3
+    },
+    "policy": "hard-safety random",
+    "seed": 91,
+    "steps": 397,
+    "success": true,
+    "deaths": 1,
+    "raw_reward": [89.7, 999.0, -162.0],
+    "scalar_return": 1.491
+  },
+  "interpretation": "The test point estimate favors geometry plus safety, but four paired seeds are underpowered, the paired standard error exceeds the mean gain, and neither condition clears the full stage. The result is exploratory, not evidence of a gameplay win. The successful short-phase probe motivates a completion-gated phase curriculum."
+}

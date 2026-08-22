@@ -419,17 +419,56 @@ transitions, then regressed badly by 49,152 transitions.  Three additional
 16,384-transition seeds varied widely.  These observations motivated periodic
 snapshots, validation-based selection, and an untouched test split.
 
+\subsection{Matched Lunatic ablation and curriculum probe}
+
+Plain compact recurrent PPO and the analytic-geometry plus hard-safety variant
+were each trained with seeds 1011, 2022, and 3033 for 24,576 transitions.  We
+retained updates 4, 8, and 12, selected nine candidates per condition on seeds
+71--73, and tested the selected pair on untouched seeds 81--84 for 1,200 steps.
+Source audit relabelled this condition as Stage 2 (resident index 1).
+
+\begin{table}[ht]
+  \centering
+  \caption{Matched TH05 Lunatic Stage 2 ablation.  LCB is validation mean minus
+  one standard error; deaths are totals across four test seeds.}
+  \label{tab:lunatic-ablation}
+  \begin{tabular}{lrrrr}
+    \toprule
+    Condition & Validation mean & LCB & Test mean & Test deaths \\
+    \midrule
+    Plain PPO & -0.856 & -1.449 & -1.648 & 14 \\
+    Geometry + hard safety & -0.822 & -1.422 & \textbf{-1.054} & \textbf{11} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Neither condition clears the stage.  The paired test gain is 0.594 with
+standard error 0.669, and one seed contributes most of it.  Thus the point
+estimate favors geometry plus safety but does not establish a reliable gameplay
+improvement.  The shield constrains 40.1\% of test decisions while removing
+only 2.47\% of policy probability on average, consistent with a narrow legality
+constraint rather than a scripted dodge policy.
+
+A true Stage 1 Lunatic probe at phase 3, ending at phase 4, is cleared by a
+hard-safety random policy in 397 steps with one death.  This confirms that phase
+termination provides a dense success signal.  It motivates a completion-gated
+curriculum: learn no-miss completion on a short phase, move the starting phase
+backward, reduce privileged power/resources, and only then optimize a full
+stage.  The machine-readable record is
+\path{experiments/2026-08-22-th05-lunatic-ablation.json}.
+
 \section{Threats to validity}
 
 \begin{itemize}
-  \item The final test has only four stochastic seeds and 900 steps per seed.
-  The paired standard error is large and no stage clear occurs.
+  \item Both paired tests have only four stochastic seeds (900 or 1,200 steps
+  per seed).  Paired standard errors are large and no full-stage clear occurs.
   \item Evaluation seeds control action sampling, but the native game does not
   yet expose a separately controlled environment RNG seed.
   \item The comparison model has no reproducible compatible checkpoint, so
   systems comparisons do not imply a gameplay win over prior work.
-  \item All learning evidence comes from one TH05 stage configuration.  It does
-  not establish transfer to other stages, characters, ranks, or TH01--04.
+  \item Learning evidence comes from one TH05 Stage 2 configuration; the Stage
+  1 result is only a random-policy phase probe.  Neither establishes transfer
+  to other stages, characters, ranks, or TH01--04.
   \item The compact observation drops most hazards beyond the nearest 16 in
   each category and currently omits a compact normal-enemy set.
   \item Host timing is measured while unrelated jobs are present.  CPU affinity

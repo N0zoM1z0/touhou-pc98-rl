@@ -229,16 +229,43 @@ The hand-written `SafetyHeuristic` was a negative ablation: it reached four
 deaths and terminal failure around 948-1,107 steps in short tests, worse than the
 random baseline. It is not used for behavior cloning or PPO warm-up.
 
+### Matched Lunatic ablation
+
+We trained plain compact recurrent PPO and analytic-geometry plus hard-safety
+PPO with three matched training seeds. Each run used 24,576 transitions and
+retained updates 4, 8, and 12. Nine candidates per condition were selected on
+seeds 71--73, then compared on untouched seeds 81--84 for 1,200 steps. A source
+audit after training established that this image was Stage 2 (resident index 1),
+not Stage 1 as the patch README implied.
+
+| Selected condition | Validation mean / LCB | Test mean return | Test deaths | Clears |
+| --- | ---: | ---: | ---: | ---: |
+| Plain PPO | -0.856 / -1.449 | -1.648 | 14 | 0 |
+| Geometry + hard safety | -0.822 / -1.422 | -1.054 | 11 | 0 |
+
+The paired test gain is `+0.594` with standard error `0.669`. One seed accounts
+for most of the gain, so this is not a statistically persuasive gameplay win.
+The hard mask constrained 40.1% of decision points while removing only 2.47% of
+policy probability on average; it enforces exact availability and boundary
+semantics, not competent dodging.
+
+A separate true Stage 1 Lunatic probe started at boss phase 3 and terminated at
+phase 4 with full power. A hard-safety random policy cleared it in 397 steps
+with one death. This validates phase success and provides a dense starting task
+for completion-gated curriculum training. Exact values are in
+`experiments/2026-08-22-th05-lunatic-ablation.json`.
+
 ## Next experiments
 
 The highest-value next work is:
 
-1. Run longer, multi-seed training with a separate validation seed set and keep
-   a final untouched test set.
-2. Add enemy tokens and time-to-collision features; the current 273-float schema
+1. Train the verified Stage 1 phase 3-to-4 task to reliable no-miss completion,
+   then move the start phase backward only after a held-out completion gate.
+2. Add enemy tokens and evaluate the implemented time-to-collision features;
+   the current 273-float schema
    includes nearest bullets/special projectiles but not a compact enemy set.
-3. Randomize stage, phase, character, rank, and power through curriculum levels,
-   then measure stage completion rather than only short-prefix return.
+3. Reduce starting power/resources and expand from Stage 1 phases to full-stage
+   and later full-game completion, always measuring completion first.
 4. Decouple reset latency from synchronous rollout collection, or use an
    asynchronous worker pool once terminal events become frequent.
 5. Implement TH01-04 adapters behind the same Gymnasium interface and add
