@@ -6,7 +6,7 @@
 //! my cloc count be somehow lower...
 
 /*
-    TH05 projectiles discovery of rrr.
+    TH05 projectile discovery for Touhou PC-98 RL.
     Copyright (C) 2026  T. Liu and contributors
 
     This program is free software: you can redistribute it and/or modify

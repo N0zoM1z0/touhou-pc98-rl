@@ -1,0 +1,349 @@
+\documentclass[10pt]{article}
+
+\usepackage[a4paper,margin=25mm]{geometry}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{microtype}
+\usepackage{xcolor}
+
+\hypersetup{colorlinks=true,linkcolor=blue!50!black,citecolor=blue!50!black,urlcolor=blue!60!black}
+\newcommand{\project}{Touhou PC-98 RL}
+\newcommand{\todo}[1]{\textcolor{red!70!black}{[TODO: #1]}}
+
+\title{CPU-First Reinforcement Learning for Native PC-98 Bullet-Hell Games\\
+\large A Reproducible Systems Study and Research Plan}
+\author{Touhou PC-98 RL Project}
+\date{Working draft --- 22 August 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We study reinforcement learning (RL) directly against a native PC-98 bullet-hell
+game under a CPU-only constraint.  The principal systems problem is not merely
+policy optimization: a useful experiment must boot a legally supplied disk
+image, identify the correct emulated-memory region, provide isolated resets,
+extract observations at game rate, and avoid CPU oversubscription.  We present
+an end-to-end TH05 environment that uses exact child-process attachment, compact
+entity-set observations, a 180,136-parameter recurrent actor--critic, and
+multi-process proximal policy optimization (PPO).  Compact reads have a measured
+median latency of 0.516 ms, compared with 3.550 ms for the dense-map path, while
+reducing transferred floats by a factor of 776.  Eight emulators deliver about
+223 transitions/s on the tested host.  After 16,384 training transitions and
+validation-based checkpoint selection, an untouched four-seed, 900-step paired
+test improves mean scalar return from 0.0529 to 0.3639, halves observed deaths
+from four to two, and reduces mean resource cost by 17.4\%.  No evaluated run
+clears the stage; these results show preliminary short-horizon improvement, not
+convergence.  We document negative results, validity threats, and a path from
+the current TH05 adapter toward a common TH01--05 research framework.
+\end{abstract}
+
+\section{Research questions}
+
+This project is organized around four falsifiable research questions.
+
+\begin{description}
+  \item[RQ1: Systems feasibility.] Can an unmodified emulator plus structured
+  memory extraction sustain useful RL throughput on CPU without interfering
+  with other workloads on a shared host?
+
+  \item[RQ2: Representation efficiency.] Can a compact, permutation-invariant
+  representation of nearby hazards replace large, sparse spatial maps while
+  preserving enough state for bullet-hell control?
+
+  \item[RQ3: Learning signal.] Under a small CPU budget, does recurrent PPO
+  improve survival and resource management over a paired untrained policy?
+
+  \item[RQ4: Generality.] Which interfaces can be shared by Touhou 1--5, and
+  which memory, termination, reward, and patching components must remain
+  game-specific?
+\end{description}
+
+The present evidence addresses RQ1 strongly, RQ2 at the systems level, and RQ3
+only preliminarily.  RQ4 remains a design target: only TH05 is validated.
+
+\section{Background and related work}
+
+The initial reverse-engineering reference describes a high-fidelity,
+multi-objective bullet-hell environment and an accelerator-oriented baseline
+\cite{liu2026thrl}.  We treat that work as a source for low-level TH05 state
+discovery, not as the architecture or identity of the present framework.
+
+Our optimizer follows clipped PPO \cite{schulman2017ppo} with generalized
+advantage estimation (GAE) \cite{schulman2015gae}.  A game frame contains a
+variable-size collection of bullets and special projectiles.  Processing these
+objects as sets follows the invariance motivation of Deep Sets
+\cite{zaheer2017deepsets}; learned attention pooling is related to Set
+Transformer \cite{lee2019settransformer}, although our encoder is deliberately
+smaller and does not perform quadratic self-attention among all hazards.
+
+DOSBox-X supplies PC-98 emulation \cite{dosboxx2026}.  ReC98 release P0335 is
+used only as a clean boot baseline \cite{rec98p0335}; it is not a runtime or
+build dependency.
+
+\section{System design}
+
+\subsection{Reproducible native-game execution}
+
+The environment starts from a user-provided Japanese HDI.  A fail-closed patch
+script verifies complete SHA-256 hashes before applying the required executable
+layouts.  The supplied archive is a mixed revision: \texttt{MAIN.EXE} requires
+patch layout 1, whereas \texttt{OP.EXE} matches layout 2.  Treating layout
+numbers as a paired version produces a black screen.  Patched binaries and game
+data are never committed.
+
+Each Gymnasium environment copies the 21 MiB template HDI into a private
+temporary directory.  This makes resets independent and prevents concurrent
+workers from racing on game-written score or configuration files.  DOSBox-X is
+spawned as a direct child, and the native extension attaches to that exact PID.
+The memory search is restricted to writable anonymous mappings no larger than
+64 MiB.  This includes the approximately 30 MiB guest-memory mapping used by the
+tested DOSBox-X release; the previous 8--10 MiB cap silently excluded it.
+
+Startup and step operations have explicit timeouts.  Reset retries cover both
+process creation and the interval before initialized gameplay becomes readable.
+Workers release inputs and terminate their exact child process on shutdown.
+
+\subsection{Compact observation}
+
+The compact observation has 273 floats:
+\begin{equation}
+  37\ \text{global features}
+  + 16\!\times\!7\ \text{special-projectile features}
+  + 16\!\times\!7\ \text{bullet features}
+  + 12\ \text{item features}.
+\end{equation}
+Entities are ordered by distance for truncation, but the neural encoder pools
+them as a set.  Each entity contains relative position, velocity, type, speed,
+and normalized distance.  Missing entities use the sentinel
+$(0,0,0,0,0,0,1)$.  A previously plausible mask based only on nonzero values is
+wrong because the sentinel distance is one; the implementation now recognizes
+the full sentinel and has a regression test for all-padding inputs.
+
+The older observation additionally builds 24 maps of size $92\times96$, or
+211,968 floats per step.  Our hot path constructs no map.  This is important
+because map allocation and Python transfer can cost more than policy inference
+on CPU.
+
+\subsection{Policy and value model}
+
+Special projectiles and bullets pass through separate shared token networks.
+Each set is summarized by learned attention pooling and masked max pooling.
+Global state and item features have small multilayer perceptrons (MLPs); the
+four summaries are fused into a 128-dimensional vector.  A one-layer GRU with
+128 hidden units models temporal context.  The actor predicts 19 discrete
+actions.  A shared critic head predicts three value components rather than
+collapsing objectives before value estimation.  The model contains 180,136
+parameters.
+
+\subsection{CPU recurrent PPO}
+
+For scaled vector reward $\mathbf{r}_t\in\mathbb{R}^3$, vector GAE is
+\begin{align}
+  \boldsymbol{\delta}_t &= \mathbf{r}_t
+  + \gamma(1-d_t)\mathbf{V}(s_{t+1}) - \mathbf{V}(s_t),\\
+  \mathbf{A}_t &= \boldsymbol{\delta}_t
+  + \gamma\lambda(1-d_t)\mathbf{A}_{t+1}.
+\end{align}
+The policy advantage is $A_t=\mathbf{w}^{\top}\mathbf{A}_t$, normalized once
+after scalarization.  This avoids independently normalizing sparse objectives
+and then assigning them equal empirical variance.  PPO uses ratio clipping,
+value clipping, entropy regularization, gradient clipping, and approximate-KL
+early stopping.
+
+Rollouts are synchronous across independent emulator processes.  Every worker
+uses one PyTorch thread; the learner defaults to eight.  The parent process is
+CPU-affined and run with positive niceness.  Periodic snapshots are selected on
+a validation seed set using
+\begin{equation}
+  S = \bar{R} - z\,\frac{s_R}{\sqrt{n}},
+\end{equation}
+after prioritizing observed stage successes.  Thus the last PPO update is not
+automatically considered the best model.
+
+\section{Experimental protocol}
+
+\paragraph{Host.}
+The test machine exposes 96 logical CPU threads and approximately 755 GiB RAM.
+Other experiments occupied selected high-numbered cores.  RL jobs were run at
+niceness 10 and confined to known-idle low-numbered cores.  No GPU was visible
+to PyTorch.  The software stack used Python 3.14.6, PyTorch 2.13.0+cpu, and
+DOSBox-X tag \texttt{dosbox-x-v2026.07.02}.
+
+\paragraph{Game condition.}
+TH05 starts at stage 1 with three lives, three bombs, character 2, rank 0, and
+power 0.  The environment advances at a 36 ms action interval.  Evaluations are
+stochastic and paired by PyTorch sampling seed.  The game itself is not yet
+randomized through a controlled seed API.
+
+\paragraph{Training.}
+The selected policy comes from training seed 202 at update 8: 16,384 total
+transitions from eight workers.  Six snapshots were compared for 900 steps on
+validation seeds 41, 43, and 44.  The final comparison uses untouched seeds
+51--54.  These test seeds were not used for training or model selection.
+
+\paragraph{Metrics.}
+We report observation latency, transferred floats, model parameters, rollout
+throughput, scalar return, death count, and the raw resource-reward component.
+Stage success is the primary task metric but is absent from all short runs.
+The exact aggregate and per-seed values are tracked in
+\path{experiments/2026-08-22-th05-cpu.json}.
+
+\section{Results}
+
+\subsection{Systems efficiency}
+
+\begin{table}[ht]
+  \centering
+  \caption{Paused-game observation-reader benchmark.}
+  \label{tab:reader}
+  \begin{tabular}{lrrr}
+    \toprule
+    Reader & Median (ms) & 95th percentile (ms) & Floats returned \\
+    \midrule
+    Dense maps & 3.550 & 5.014 & 211,968 + 273 \\
+    Compact & 0.516 & 0.542 & 273 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Compact reading is 6.88 times faster by median and transfers 776 times fewer
+map-equivalent floats.  The compact actor--critic has 180,136 parameters versus
+2,375,478 for the comparison CNN--GRU model, a 13.2-fold reduction.
+
+Eight live environments sustain approximately 223 transitions/s when no reset
+occurs.  A 2,048-transition rollout takes about 9.19 s, while three PPO epochs
+take 0.20--0.33 s.  Therefore environment time, not gradient computation, is
+currently dominant.  Increasing learner threads from one to eight improved the
+model microbenchmark, but 16 threads caused severe oversubscription; bounded
+threading is part of the algorithmic system, not a cosmetic setting.
+
+\subsection{Snapshot selection}
+
+\begin{table}[ht]
+  \centering
+  \caption{Validation results for the six candidate snapshots (three seeds,
+  900 steps each).  LCB uses $z=1$.}
+  \label{tab:selection}
+  \begin{tabular}{lrrr}
+    \toprule
+    Candidate & Mean return & Standard error & LCB score \\
+    \midrule
+    Reproduction update 8 & 0.2333 & 0.2341 & -0.0007 \\
+    Reproduction update 10 & 0.2112 & 0.2573 & -0.0461 \\
+    Reproduction update 12 & 0.0167 & 0.0145 & 0.0022 \\
+    Seed 101 update 8 & 0.2408 & 0.2379 & 0.0030 \\
+    Seed 202 update 8 & 0.2743 & 0.2362 & \textbf{0.0381} \\
+    Seed 303 update 8 & 0.2769 & 0.2401 & 0.0368 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The candidate with the highest mean is not selected: seed 202 has a slightly
+higher lower-confidence score than seed 303.  This illustrates why latest-only
+or single-seed checkpointing is unreliable at this budget.
+
+\subsection{Untouched paired test}
+
+\begin{table}[ht]
+  \centering
+  \caption{Untouched stochastic test.  Resource values closer to zero are
+  better.}
+  \label{tab:test}
+  \begin{tabular}{rrrrrrr}
+    \toprule
+    Seed & \multicolumn{3}{c}{Untrained} & \multicolumn{3}{c}{Selected PPO} \\
+    \cmidrule(lr){2-4}\cmidrule(lr){5-7}
+      & Return & Deaths & Resource & Return & Deaths & Resource \\
+    \midrule
+    51 & 0.0085 & 1 & -157 & 0.0135 & 1 & -157 \\
+    52 & 0.0165 & 1 & -155 & 0.6875 & 0 & -87 \\
+    53 & 0.1985 & 1 & -83  & 0.7325 & 0 & -69 \\
+    54 & -0.0120 & 1 & -168 & 0.0220 & 1 & -152 \\
+    \midrule
+    Mean/total & 0.0529 & 4 & -140.75 & \textbf{0.3639} & \textbf{2} & \textbf{-116.25} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The paired mean return gain is 0.3110 with standard error 0.1707.  Deaths fall
+by 50\%, and mean resource cost improves by 17.4\%.  With only four seeds, the
+uncertainty is large; a normal 95\% interval for return gain would cross zero.
+The correct conclusion is preliminary improvement, not statistical certainty.
+
+\subsection{Negative and unstable results}
+
+A hand-written short-horizon collision heuristic performs worse than random in
+the tested condition, reaching four deaths and terminal failure around
+948--1,107 steps.  Independent nearest-bullet prediction does not capture
+multi-projectile escape geometry; the heuristic is retained only as a negative
+ablation and is not used for behavior cloning.
+
+An earlier exploratory policy improved four-seed return after 24,576
+transitions, then regressed badly by 49,152 transitions.  Three additional
+16,384-transition seeds varied widely.  These observations motivated periodic
+snapshots, validation-based selection, and an untouched test split.
+
+\section{Threats to validity}
+
+\begin{itemize}
+  \item The final test has only four stochastic seeds and 900 steps per seed.
+  The paired standard error is large and no stage clear occurs.
+  \item Evaluation seeds control action sampling, but the native game does not
+  yet expose a separately controlled environment RNG seed.
+  \item The comparison model has no reproducible compatible checkpoint, so
+  systems comparisons do not imply a gameplay win over prior work.
+  \item All learning evidence comes from one TH05 stage configuration.  It does
+  not establish transfer to other stages, characters, ranks, or TH01--04.
+  \item The compact observation drops most hazards beyond the nearest 16 in
+  each category and currently omits a compact normal-enemy set.
+  \item Host timing is measured while unrelated jobs are present.  CPU affinity
+  and niceness reduce interference but do not produce a dedicated-machine
+  benchmark.
+\end{itemize}
+
+\section{Research roadmap}
+
+The next experiments are specified as hypotheses rather than assumed upgrades.
+
+\paragraph{H1: richer compact geometry.}
+Add normal-enemy tokens and analytic time-to-collision features while keeping
+the observation below 2 KiB.  Compare against the 273-float schema with matched
+training transitions and validation/test splits.
+
+\paragraph{H2: curriculum and generalization.}
+Randomize stage, phase, character, rank, power, lives, and bombs.  Use stage
+completion and resource-normalized completion as primary metrics.  Hold out
+entire configurations, not only sampling seeds.
+
+\paragraph{H3: reset-aware collection.}
+When terminals become common, replace global synchronous waiting with an
+asynchronous collector or reset pool.  The prediction is improved wall-clock
+throughput without changing the on-policy age bound.
+
+\paragraph{H4: risk-aware objectives.}
+Compare the fixed scalarization with constrained or distributional survival
+objectives.  Any method must report the full reward vector and may not hide a
+survival regression behind score gain.
+
+\paragraph{H5: old-five-games interface.}
+Define per-game contracts for observation schema, action meaning, terminal
+flags, executable identity, and reset.  TH01--04 enter the benchmark only after
+live parser/action tests pass; shared code alone is not evidence of support.
+
+\section{Conclusion}
+
+Native PC-98 RL is practical on a CPU when observation construction, process
+attachment, worker isolation, and thread scheduling are treated as first-class
+research concerns.  The present system removes a large dense-map bottleneck,
+runs eight independent games at useful speed, and exhibits a promising but
+small-data improvement in survival and resource use.  The main scientific task
+now is not to declare success, but to turn this systems baseline into a larger,
+pre-registered multi-configuration study with true stage completion metrics.
+
+\bibliographystyle{plain}
+\bibliography{references}
+
+\end{document}

@@ -1,0 +1,78 @@
+{
+  "date": "2026-08-22",
+  "scope": "TH05 stage-1 short-prefix CPU-only baseline",
+  "software": {
+    "dosbox_x_tag": "dosbox-x-v2026.07.02",
+    "python": "3.14.6",
+    "pytorch": "2.13.0+cpu"
+  },
+  "game_config": {
+    "stage": 1,
+    "lives": 3,
+    "bombs": 3,
+    "character": 2,
+    "rank": 0,
+    "power": 0,
+    "action_interval_ms": 36
+  },
+  "systems": {
+    "compact_reader_median_ms": 0.5158,
+    "compact_reader_p95_ms": 0.542,
+    "dense_reader_median_ms": 3.5497,
+    "dense_reader_p95_ms": 5.014,
+    "compact_floats": 273,
+    "dense_map_floats": 211968,
+    "compact_model_parameters": 180136,
+    "comparison_model_parameters": 2375478,
+    "eight_worker_transitions_per_s": 222.9,
+    "rollout_2048_s": 9.19,
+    "ppo_update_2048_s_range": [0.2, 0.33]
+  },
+  "selected_checkpoint": {
+    "local_path": "models/pc98_entity_ppo_best.pt",
+    "sha256": "b17810efdf0c87cd78771641537e7d26b7356609934f69e274f0630888530587",
+    "training_seed": 202,
+    "update": 8,
+    "training_transitions": 16384
+  },
+  "selection": {
+    "steps_per_evaluation": 900,
+    "seeds": [41, 43, 44],
+    "lcb_z": 1.0,
+    "candidates": [
+      {"name": "reproduction-update-8", "mean_return": 0.233333, "standard_error": 0.234052, "lcb": -0.000718},
+      {"name": "reproduction-update-10", "mean_return": 0.211168, "standard_error": 0.257317, "lcb": -0.046149},
+      {"name": "reproduction-update-12", "mean_return": 0.016667, "standard_error": 0.014469, "lcb": 0.002197},
+      {"name": "training-seed-101-update-8", "mean_return": 0.240833, "standard_error": 0.237864, "lcb": 0.00297},
+      {"name": "training-seed-202-update-8", "mean_return": 0.274333, "standard_error": 0.236212, "lcb": 0.038121},
+      {"name": "training-seed-303-update-8", "mean_return": 0.276887, "standard_error": 0.24006, "lcb": 0.036827}
+    ]
+  },
+  "untouched_test": {
+    "steps_per_evaluation": 900,
+    "seeds": [51, 52, 53, 54],
+    "untrained": [
+      {"seed": 51, "scalar_return": 0.0085, "deaths": 1, "raw_reward": [40.0, 1.0, -157.0]},
+      {"seed": 52, "scalar_return": 0.0165, "deaths": 1, "raw_reward": [40.0, 4.0, -155.0]},
+      {"seed": 53, "scalar_return": 0.1985, "deaths": 1, "raw_reward": [40.0, 6.0, -83.0]},
+      {"seed": 54, "scalar_return": -0.012, "deaths": 1, "raw_reward": [40.0, 8.0, -168.0]}
+    ],
+    "selected": [
+      {"seed": 51, "scalar_return": 0.0135, "deaths": 1, "raw_reward": [40.0, 6.0, -157.0]},
+      {"seed": 52, "scalar_return": 0.6875, "deaths": 0, "raw_reward": [90.0, 5.0, -87.0]},
+      {"seed": 53, "scalar_return": 0.7325, "deaths": 0, "raw_reward": [90.0, 5.0, -69.0]},
+      {"seed": 54, "scalar_return": 0.022, "deaths": 1, "raw_reward": [40.0, 2.0, -152.0]}
+    ],
+    "summary": {
+      "untrained_mean_return": 0.052875,
+      "selected_mean_return": 0.363875,
+      "paired_mean_gain": 0.311,
+      "paired_gain_standard_error": 0.170708,
+      "untrained_deaths": 4,
+      "selected_deaths": 2,
+      "untrained_mean_resource": -140.75,
+      "selected_mean_resource": -116.25,
+      "stage_successes": 0
+    }
+  }
+}

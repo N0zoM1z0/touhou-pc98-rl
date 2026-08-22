@@ -1,11 +1,11 @@
 [package]
-name = "rrr"
-version = "0.1.12"
+name = "touhou-pc98-rl-native"
+version = "0.1.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
 
 [lib]
-name = "rrr"
+name = "_native"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]

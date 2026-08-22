@@ -2,7 +2,7 @@ use crate::games::th05_c::types::GameState;
 use serde::{Deserialize, Serialize};
 
 /*
-    Player Observation of rrr.
+    Player observation for Touhou PC-98 RL.
     Copyright (C) 2026  T. Liu and contributors
 
     This program is free software: you can redistribute it and/or modify

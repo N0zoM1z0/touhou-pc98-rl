@@ -3,7 +3,7 @@ use crate::error::Result;
 use crate::memory::ProcessMemory;
 
 /*
-    TH05 enemy discovery of rrr.
+    TH05 enemy discovery for Touhou PC-98 RL.
     Copyright (C) 2026  T. Liu and contributors
 
     This program is free software: you can redistribute it and/or modify

@@ -9,7 +9,7 @@ const MAIN_STAGE_COUNT: usize = 6;
 const _STAGE_EXTRA: usize = MAIN_STAGE_COUNT;
 
 /*
-    TH05 Resident structure finder of rrr.
+    TH05 resident-structure finder for Touhou PC-98 RL.
     Copyright (C) 2026  T. Liu and contributors
 
     This program is free software: you can redistribute it and/or modify
@@ -39,7 +39,11 @@ const _STAGE_EXTRA: usize = MAIN_STAGE_COUNT;
 pub fn find_resident(mem: &mut ProcessMemory) -> Result<usize> {
     tracing::info!("Searching for resident structure...");
 
-    let matches = mem.search_pattern(offsets::TH05Config::RESIDENT_SIGNATURE, None);
+    // Limit the scan to writable anonymous DOSBox-X mappings.  Besides being
+    // much faster than scanning every loaded multimedia library, this includes
+    // the ~30 MiB guest-memory mapping used by current DOSBox-X releases.
+    let regions: Vec<_> = mem.anonymous_regions().into_iter().cloned().collect();
+    let matches = mem.search_pattern(offsets::TH05Config::RESIDENT_SIGNATURE, Some(&regions));
 
     if matches.is_empty() {
         return Err(Error::StructureNotFound { name: "resident" });

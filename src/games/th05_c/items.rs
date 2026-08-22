@@ -5,7 +5,7 @@
 //! Deleted that unnecersary check
 
 /*
-    TH05 Item Discovery of rrr.
+    TH05 item discovery for Touhou PC-98 RL.
     Copyright (C) 2026  T. Liu and contributors
 
     This program is free software: you can redistribute it and/or modify

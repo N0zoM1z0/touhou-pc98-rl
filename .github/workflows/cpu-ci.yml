@@ -1,0 +1,26 @@
+name: CPU CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+      - uses: astral-sh/setup-uv@v7
+      - name: Native build dependencies
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev
+      - name: Build CPU environment
+        run: uv sync
+      - name: Unit tests
+        run: make test

@@ -1,7 +1,7 @@
 use crate::games::th05_c::types::GameState;
 
 /*
-    Reward algorithm of rrr.
+    Reward components for Touhou PC-98 RL.
     Copyright (C) 2026  T. Liu and contributors
 
     This program is free software: you can redistribute it and/or modify

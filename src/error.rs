@@ -4,7 +4,7 @@
 //! Also not changed, other than added a other error
 
 /*
-    Error handling of RL-rs, rrr.
+    Error handling for Touhou PC-98 RL.
     Copyright (C) 2026  T. Liu and contributors
 
     This program is free software: you can redistribute it and/or modify

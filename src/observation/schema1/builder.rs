@@ -160,6 +160,40 @@ impl ObservationBuilder {
         let obs = self.build_observation(state);
         (obs.to_feature_vec(), obs.to_map_tensor())
     }
+
+    /// Build only the compact scalar and nearest-entity representation.
+    ///
+    /// This deliberately avoids constructing the four dense spatial maps.  It
+    /// is the hot path for CPU rollout workers, where allocating the maps only
+    /// to discard them costs substantially more than model inference.
+    pub fn build_feature_vec(&self, state: &GameState) -> Vec<f32> {
+        let player = PlayerFeatures::from_game_state(state);
+        let boss = BossFeatures::from_game_state(state);
+        let game_state = StateFeatures::from_game_state(state);
+        let (px, py) = state.player.pos.to_pixels();
+        let projectile_entities = extract_projectile_entities(
+            &state.lasers,
+            &state.firewaves,
+            &state.cheeto_trails,
+            &state.custom_entities,
+            px,
+            py,
+            self.span_x_px,
+            self.span_y_px,
+        );
+        let bullet_entities = extract_bullet_entities(state, self.span_x_px, self.span_y_px);
+        let drop_features = DropFeatures::from_game_state(state, self.span_x_px, self.span_y_px);
+
+        let mut features = Vec::with_capacity(Observation::feature_only_count());
+        features.extend(player.to_vec());
+        features.extend(boss.to_vec());
+        features.extend(game_state.to_vec());
+        features.extend(projectile_entities);
+        features.extend(bullet_entities);
+        features.extend(drop_features.features);
+        debug_assert_eq!(features.len(), Observation::feature_only_count());
+        features
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

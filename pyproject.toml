@@ -4,30 +4,26 @@ build-backend = "maturin"
 [tool.maturin]
 # Build artifacts with the specified Cargo profile
 profile = "release"
+module-name = "pc98rl._native"
 [project]
-name = "rrr"
-version = "0.1.12"
-description = "Touhou Reinforcement Learning Framework"
-requires-python = ">=3.14"
+name = "touhou-pc98-rl"
+version = "0.1.0"
+description = "CPU-first reinforcement-learning lab for Touhou PC-98 games"
+requires-python = ">=3.12"
 dependencies = [
-  "matplotlib>=3.11.1",
+  "gymnasium>=1.2,<2",
   "numpy>=2.5.1",
-  "packaging>=26.2",
-  "pandas>=3.0.5",
-  "safetensors>=0.7.0",
-  "torch==2.13.0+xpu",
-  "tqdm>=4.70.0",
+  "torch==2.13.0",
 ]
 
 [tool.uv]
 index-strategy = "unsafe-best-match"
-#reinstall-package = ["rrr"] # So I do not need to advance number every time.
+#reinstall-package = ["touhou-pc98-rl"]
 
 [tool.uv.sources]
-torch = { index = "pytorch-xpu" }
-torchvision = { index = "pytorch-xpu" }
-torchaudio = { index = "pytorch-xpu" }
+torch = { index = "pytorch-cpu" }
 
 [[tool.uv.index]]
-name = "pytorch-xpu"
-url = "https://download.pytorch.org/whl/xpu"
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true

@@ -13,7 +13,7 @@
 //! So I just use unsafe here. Th05 has more data to do than th04.
 
 /*
-    TH05 memory reader of rrr.
+    TH05 memory reader for Touhou PC-98 RL.
     Copyright (C) 2026  T. Liu and contributors
 
     This program is free software: you can redistribute it and/or modify

@@ -399,23 +399,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc897dd8d9e8bd1ed8cdad82b5966c3e0ecae09fb1907d58efaa013543185d0a"
 
 [[package]]
-name = "rrr"
-version = "0.1.12"
-dependencies = [
- "csv",
- "evdev",
- "libc",
- "nix 0.31.3",
- "pyo3",
- "rand",
- "serde",
- "serde_json",
- "thiserror",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "ryu"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -546,6 +529,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f60246a4944f24f6e018aa17cdeffb7818b76356965d03b07d6a9886e8962185"
 dependencies = [
  "cfg-if",
+]
+
+[[package]]
+name = "touhou-pc98-rl-native"
+version = "0.1.0"
+dependencies = [
+ "csv",
+ "evdev",
+ "libc",
+ "nix 0.31.3",
+ "pyo3",
+ "rand",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

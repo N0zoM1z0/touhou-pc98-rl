@@ -32,6 +32,11 @@ use std::io::{Read, Seek, SeekFrom};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 
+/// DOSBox-X 2026 places the emulated PC-98 RAM in an anonymous mapping of
+/// roughly 30 MiB.  Older versions used smaller mappings, so the original
+/// 8/10 MiB limits silently skipped the guest memory we actually need.
+const MAX_GUEST_MEMORY_REGION_BYTES: usize = 64 * 1024 * 1024;
+
 /// A memory region from /proc/<PID>/maps.
 // (OFC, where can it else been? COM1?)
 #[derive(Debug, Clone)]
@@ -282,7 +287,7 @@ impl ProcessMemory {
                 continue;
             }
 
-            if size > 10 * 1024 * 1024 {
+            if size > MAX_GUEST_MEMORY_REGION_BYTES {
                 continue;
             }
 
@@ -316,7 +321,7 @@ impl ProcessMemory {
             r.is_writable()
                 && r.is_private()
                 && r.size > 0
-                && r.size <= 8 * 1024 * 1024
+                && r.size <= MAX_GUEST_MEMORY_REGION_BYTES
                 && !r.pathname.contains("[stack]")
                 && !r.pathname.contains("memfd:pulseaudio")
         })
@@ -328,7 +333,7 @@ impl ProcessMemory {
             r.is_writable()
                 && r.is_private()
                 && r.size > 0
-                && r.size <= 8 * 1024 * 1024
+                && r.size <= MAX_GUEST_MEMORY_REGION_BYTES
                 && (r.is_anonymous() || r.pathname.contains("dosbox-x"))
         })
     }

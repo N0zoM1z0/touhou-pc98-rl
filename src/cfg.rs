@@ -24,7 +24,7 @@
 //! works but lemme donau the MORL farst...
 
 /*
-    Curriculum Algorithms of rrr.
+    Curriculum configuration for Touhou PC-98 RL.
     Copyright (C) 2026  T. Liu and contributors
 
     This program is free software: you can redistribute it and/or modify

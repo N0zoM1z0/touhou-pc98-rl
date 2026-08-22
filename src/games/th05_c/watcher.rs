@@ -4,7 +4,7 @@ use crate::games::th05_c::{DynAddressFinder, GameState, PlayerState};
 use crate::observation::schema1::ObservationBuilder;
 
 /*
-    TH05 memory watcher of rrr.
+    TH05 memory watcher for Touhou PC-98 RL.
     Copyright (C) 2026  T. Liu and contributors
 
     This program is free software: you can redistribute it and/or modify
@@ -171,6 +171,12 @@ impl TH05MemoryWatcher {
 
     pub fn observation_comp(&self, state: &GameState) -> (Vec<f32>, Vec<f32>) {
         self.obs_builder.build_components(state)
+    }
+
+    /// Build only the compact scalar/entity observation.  This avoids allocating
+    /// the 24 x 92 x 96 dense maps for CPU-oriented agents.
+    pub fn observation_features(&self, state: &GameState) -> Vec<f32> {
+        self.obs_builder.build_feature_vec(state)
     }
 
     pub fn apply_action(&mut self, action: usize) -> Result<(), Box<dyn std::error::Error>> {

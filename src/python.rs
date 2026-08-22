@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::io::ErrorKind;
 
 /*
-    Rust-Python Bindings of rrr.
+    Rust-Python bindings for Touhou PC-98 RL.
     Copyright (C) 2026  T. Liu and contributors
 
     This program is free software: you can redistribute it and/or modify
@@ -27,7 +27,7 @@ use std::io::ErrorKind;
 
 /// It is a snapshort which has not been passed to the map generator, so it is quite
 /// small and is good for sitting in ram. When needed, pass it back to map.
-#[pyclass(module = "rrr")]
+#[pyclass(module = "pc98rl._native", from_py_object)]
 #[derive(Clone, Serialize, Deserialize)]
 pub struct RawFrame {
     pub(crate) state: GameState,
@@ -151,12 +151,26 @@ impl MemoryWatcher {
     /// child and attached to main directly. So I would not require perfect timing
     /// to launch the agent.
     #[new]
-    #[pyo3(signature = (spawn_dosbox=false))]
-    pub fn new(spawn_dosbox: bool) -> PyResult<Self> {
+    #[pyo3(signature = (spawn_dosbox=false, pid=None, image_path=None))]
+    pub fn new(
+        spawn_dosbox: bool,
+        pid: Option<i32>,
+        image_path: Option<String>,
+    ) -> PyResult<Self> {
         if spawn_dosbox {
-            Self::new_spawn()
+            if pid.is_some() {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "pid cannot be combined with spawn_dosbox=True",
+                ));
+            }
+            Self::new_spawn(image_path.as_deref())
         } else {
-            Self::new_attach()
+            if image_path.is_some() {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "image_path requires spawn_dosbox=True",
+                ));
+            }
+            Self::new_attach(pid)
         }
     }
 
@@ -214,6 +228,38 @@ impl MemoryWatcher {
 
         let raw_frame = RawFrame { state };
         Ok(Some((features, maps, game_end_flag, rewards, raw_frame)))
+    }
+
+    /// Read the same game state without constructing dense spatial maps.
+    ///
+    /// The compact 273-float observation already contains player/boss state,
+    /// the nearest 16 regular bullets, the nearest 16 special projectiles, and
+    /// drop features.  Returning it directly cuts per-step observation traffic
+    /// from roughly 0.81 MiB to 1.1 KiB.
+    pub fn read_features(&mut self) -> PyResult<Option<(Vec<f32>, u8, Vec<f32>, RawFrame)>> {
+        let prev_state = self.inner.last_state.clone();
+
+        let state = match self.inner.try_read_state() {
+            Some(s) => s,
+            None => return Ok(None),
+        };
+
+        let features = self.inner.observation_features(&state);
+        let game_end_flag = state.resident.game_end_flag;
+        let rewards = if let Some(ref prev) = prev_state {
+            let mut rewards =
+                crate::observation::schema1::reward::calculate_reward_m(Some(prev), &state);
+            if game_end_flag == 1 {
+                rewards[0] -= 100.0;
+            } else if game_end_flag == 2 {
+                rewards[0] += 100.0;
+            }
+            rewards
+        } else {
+            vec![0.0, 0.0, 0.0]
+        };
+
+        Ok(Some((features, game_end_flag, rewards, RawFrame { state })))
     }
 
     pub fn clear_state(&mut self) {
@@ -333,9 +379,12 @@ impl MemoryWatcher {
     }
 
     /// Attach to one, very old.
-    fn new_attach() -> PyResult<Self> {
-        let pid = crate::memory::find_pid()
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+    fn new_attach(requested_pid: Option<i32>) -> PyResult<Self> {
+        let pid = match requested_pid {
+            Some(pid) => pid,
+            None => crate::memory::find_pid()
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?,
+        };
         let mut inner = TH05MemoryWatcher::new(pid)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         inner
@@ -349,29 +398,48 @@ impl MemoryWatcher {
         })
     }
 
-    fn new_spawn() -> PyResult<Self> {
+    fn new_spawn(image_path: Option<&str>) -> PyResult<Self> {
         use std::process::Command;
 
-        let export_dir = std::env::current_dir()
+        let project_dir = std::env::current_dir()
             .map_err(|e| {
                 pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to get cwd: {}", e))
-            })?
-            .join("export");
+            })?;
+        let export_dir = project_dir.join("export");
 
-        let child = Command::new("dosbox-x")
-            .args([
-                ".",
-                "-conf",
-                "./default.conf",
-                "-c",
-                "mount c .",
-                "-c",
-                "c:",
-                "-c",
-                "game",
-                "-fastlaunch",
-            ])
-            .current_dir(&export_dir)
+        let mut command = Command::new("dosbox-x");
+        if let Some(image_path) = image_path {
+            let image_path = std::fs::canonicalize(image_path).map_err(|e| {
+                pyo3::exceptions::PyValueError::new_err(format!(
+                    "Failed to resolve image_path '{}': {}",
+                    image_path, e
+                ))
+            })?;
+            let image_path = image_path.to_string_lossy();
+            let conf_path = export_dir.join("default.conf");
+            command
+                .args(["-conf", &conf_path.to_string_lossy()])
+                .args(["-c", &format!("imgmount c \"{}\" -partidx 0", image_path)])
+                .args(["-c", "c:", "-c", "cd kaiki", "-c", "game", "-fastlaunch"])
+                .current_dir(&project_dir);
+        } else {
+            command
+                .args([
+                    ".",
+                    "-conf",
+                    "./default.conf",
+                    "-c",
+                    "mount c .",
+                    "-c",
+                    "c:",
+                    "-c",
+                    "game",
+                    "-fastlaunch",
+                ])
+                .current_dir(&export_dir);
+        }
+
+        let child = command
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .spawn()
@@ -485,7 +553,7 @@ pub fn rec_maps_bytes<'py>(
 }
 
 #[pymodule]
-fn rrr(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<MemoryWatcher>()?;
     m.add_class::<RawFrame>()?;
     m.add_function(wrap_pyfunction!(cfg_execute, m)?)?;

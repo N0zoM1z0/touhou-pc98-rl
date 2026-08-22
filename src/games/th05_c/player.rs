@@ -1,7 +1,7 @@
 //! TH05 Player position discovery.
 
 /*
-    TH05 Player position discovery of rrr.
+    TH05 player-position discovery for Touhou PC-98 RL.
     Copyright (C) 2026  T. Liu and contributors
 
     This program is free software: you can redistribute it and/or modify
