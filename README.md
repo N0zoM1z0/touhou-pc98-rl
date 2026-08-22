@@ -36,6 +36,9 @@ scripts/patch_th05.sh external/source/KAIKI external/th05patch external/th05-pat
 scripts/prepare_hdi.sh \
   "external/game/[th01-05] 旧五作 (模拟器+汉化版+日文版)/日文版/zun.hdi" \
   external/th05-patched external/th05-rl.hdi
+scripts/make_th05_scenario.sh \
+  external/th05-rl.hdi external/th05-lunatic-stage1.hdi \
+  --stage 1 --rank 3 --character 2 --power 0 --lives 3 --bombs 3
 
 uv sync --reinstall-package touhou-pc98-rl
 make test
@@ -43,7 +46,7 @@ make test
 export PATH="$PWD/external/dosbox-x-install/bin:$PATH"
 CUDA_VISIBLE_DEVICES='' nice -n 10 taskset -c 0-47 \
   xvfb-run --auto-servernum uv run python -m pc98rl.ppo \
-  --image external/th05-rl.hdi --workers 8 --threads 8 \
+  --image external/th05-lunatic-stage1.hdi --workers 8 --threads 8 \
   --analytic-geometry --hard-safety
 ```
 

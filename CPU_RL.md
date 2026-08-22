@@ -98,6 +98,23 @@ cat /proc/sys/kernel/yama/ptrace_scope
 The tested host reports `0`. Changing a stricter system policy is an
 administrator decision and is not performed by these scripts.
 
+## Build an explicit TH05 scenario
+
+Never mutate the verified template image for a curriculum experiment. Create a
+named copy whose embedded configuration is range-checked:
+
+```bash
+scripts/make_th05_scenario.sh \
+  external/th05-rl.hdi external/th05-lunatic-stage1.hdi \
+  --stage 1 --phase 0 --end-phase 0 \
+  --character 2 --rank 3 --power 0 --lives 3 --bombs 3
+```
+
+The script refuses to overwrite its input or an existing output unless
+`--force` is explicit. Stage uses the patch's `skip_to` numbering (1 is the
+first regular stage), and rank 3 is Lunatic. Models and reports must record the
+complete scenario rather than relying on a filename.
+
 ## Train without disturbing other workloads
 
 The trainer limits each emulator worker to one PyTorch thread and defaults the
