@@ -49,7 +49,8 @@ For PC-98 era games:
     uv tool install maturin
     ```
 4. Patch your game executables. See repo th05patch. Place them at ./export/. 
-5.  ```shell
+5. Use `make defconfig` to move core/defparam.py to core/param.py so you can run it.
+6.  ```shell
     maturin develop
     uv sync
     sudo $(eval echo ~$(whoami))/.local/bin/uv run main.py

@@ -14,3 +14,4 @@ core/__pycache__/
 dist/
 docs/chapters/*.aux
 docs/*.aux
+core/param.py

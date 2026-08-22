@@ -9,7 +9,7 @@ import torch
 
 # === Live adjustment after training started === #
 RL_BY_HUMAN = False
-RESET_OPTIMIZER_ON_RESUME = False
+RESET_OPTIMIZER_ON_RESUME = True
 RESET_LAMBDA_ON_RESUME = False
 
 # === PATH === #
@@ -44,6 +44,7 @@ MAX_GRAD_NORM = 0.5
 # === WORKER SETTINGS === #
 NUM_WORKERS = 1 if RL_BY_HUMAN else 4
 CHUNK_SIZE = 64  # Need to dividable by `SEQ_LEN`
+OFF_POLICY = 0
 MAX_POLICY_STALENESS = 2
 
 # === MODEL SETTINGS === #

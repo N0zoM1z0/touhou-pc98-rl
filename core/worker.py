@@ -247,25 +247,59 @@ def worker_fn(worker_id, chunk_queue, pipe, initial_weights_bytes, initial_polic
                 break
 
         # Check for messages from host
-        while pipe.poll():
+        paused = False
+        while paused or pipe.poll():
             msg = pipe.recv()
-            if msg["type"] == "weights":
+            msg_type = msg["type"]
+            if msg_type == "pause":
+                if OFF_POLICY or paused:
+                    continue
+                watcher.release_action()
+                watcher.pause_game()
+                paused = True
+                pipe.send({
+                    "type": "paused",
+                    "worker_id": worker_id,
+                    "version": local_policy_ver,
+                })
+            elif msg_type == "weights":
                 buf = io.BytesIO(msg["data"])
                 sd = torch.load(buf, map_location="cpu", weights_only=False)
                 model.load_state_dict(sd)
                 local_policy_ver = msg["version"]
-                logging.info(f"w{worker_id}: Policy updated to v{local_policy_ver}")
-            elif msg["type"] == "config":  # future consideration also not used.
+                hidden = torch.zeros(1, 1, GRU_HIDDEN_SIZE)
+                logging.info(
+                    f"w{worker_id}: Policy updated to v{local_policy_ver}"
+                )
+                if paused:
+                    pipe.send({
+                        "type": "ready",
+                        "worker_id": worker_id,
+                        "version": local_policy_ver,
+                    })
+            elif msg_type == "config":  # future consideration also not used.
                 local_config_ver = msg["version"]
-                logging.info(f"w{worker_id}: Config v{local_config_ver}, restarting.")
+                logging.info(
+                    f"w{worker_id}: Config v{local_config_ver}, restarting."
+                )
+                if paused:
+                    watcher.resume_game()
                 watcher.terminate()
                 time.sleep(1.0)
                 watcher, state = spawn_watcher()
+                if paused:
+                    watcher.pause_game()
                 hidden = torch.zeros(1, 1, GRU_HIDDEN_SIZE)
                 ep_rewards = np.zeros(n_obj, dtype=np.float64)
                 ep_len = 0
-            elif msg["type"] == "shutdown":  # Should not be like this in current version.
+            elif msg_type == "resume":
+                if paused:
+                    watcher.resume_game()
+                    paused = False
+            elif msg_type == "shutdown":  # Should not be like this in current version.
                 # deprecated
+                if paused:
+                    watcher.resume_game()
                 logging.info(f"w{worker_id}: Shutdown received")
                 watcher.terminate()
                 return

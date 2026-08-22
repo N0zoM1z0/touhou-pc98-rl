@@ -156,6 +156,20 @@ def train() -> None:
         return buf.getvalue()
     initial_weights = serialize_weights()
 
+    def wait_for_workers(message_type, version):
+        waiting = set(range(NUM_WORKERS))
+        while waiting:
+            for wid in tuple(waiting):
+                if host_pipes[wid].poll(0.01): 
+                    # wait for each 10ms which is well under 57.??? fps.
+                    msg = host_pipes[wid].recv()
+                    if msg.get("type") == message_type and msg.get("version") == version:
+                        waiting.remove(wid)
+                elif not workers[wid].is_alive():
+                    raise RuntimeError(
+                        f"Worker {wid} exited"
+                    )
+
     logging.info(f"Preparation Complete. Spawning Workers.")
 
     workers = []
@@ -221,10 +235,14 @@ def train() -> None:
 
                 # Reject chunks that policy too old.
                 staleness = policy_version - chunk["policy_version"]
-                if staleness > MAX_POLICY_STALENESS:
+                # The on policy rejects the chunk anyway so we won't get too many messages in tty.
+                if OFF_POLICY and staleness > MAX_POLICY_STALENESS:
                     logging.info(f"host: Rejected stale chunk from W{chunk['worker_id']} "
                                  f"(policy v{chunk['policy_version']} vs current v{policy_version})"
                                  )
+                    continue
+                
+                if not OFF_POLICY and staleness != 0:
                     continue
 
                 ns = chunk["n_steps"]
@@ -245,6 +263,11 @@ def train() -> None:
             if not got_any:
                 time.sleep(0.01)
             continue
+
+        if not OFF_POLICY:
+            for pipe in host_pipes:
+                pipe.send({"type": "pause", "version": policy_version})
+            wait_for_workers("paused", policy_version)
 
         # === (MO)PPO Update === #
         logging.info(f"moppo: Update {update_step} ({acc_steps} steps from workers)...")
@@ -549,6 +572,10 @@ def train() -> None:
         new_weights = serialize_weights()
         for pipe in host_pipes:
             pipe.send({"type": "weights", "data": new_weights, "version": policy_version})
+        if not OFF_POLICY:
+            wait_for_workers("ready", policy_version)
+            for pipe in host_pipes:
+                pipe.send({"type": "resume", "version": policy_version})
 
         # Save checkpoint
         torch_save({

@@ -62,3 +62,5 @@ switch:
 		-e '  s/\s*\z/\n\n$$b\n/;' \
 		-e '  print STDOUT "XPU enabled\n";' \
 		-e '}' pyproject.toml
+defconfig:
+	@cp core/defparam.py core/param.py
