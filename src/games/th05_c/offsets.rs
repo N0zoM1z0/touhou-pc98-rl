@@ -29,6 +29,9 @@ impl TH05Offsets {
     pub const P2ITEMS: isize = -0x15A0;
     pub const P2STAGE_GRAZE: isize = -0x526;
     pub const P2INVINCIBLE: usize = 0x1C;
+    pub const P2CONTROL_LOCK: usize = 0x1D;
+    pub const P2PLAYER_IS_HIT: usize = 0x21;
+    pub const P2MISS_TIME: usize = 0x22;
     pub const P2KEY_DET: isize = -0x9448;
     pub const P2SHIFT_KEY: isize = -0x9446;
     pub const P2POWER: usize = 0x1E;

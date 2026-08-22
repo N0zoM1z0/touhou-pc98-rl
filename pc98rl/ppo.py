@@ -26,7 +26,7 @@ from .env import (
     describe_th05_scenario,
 )
 from .model import FEATURE_DIM, EntityActorCritic, FutureMissHead
-from .safety import AuditedRegularBulletShield, EmergencyBombShield
+from .safety import AuditedRegularBulletShield, DeathbombShield, EmergencyBombShield
 
 
 def _worker_main(
@@ -36,6 +36,7 @@ def _worker_main(
     seed: int,
     regular_bullet_safety_horizon: int,
     regular_bullet_safety_margin: float,
+    deathbomb_safety: bool,
 ) -> None:
     """Own one DOSBox-X process and keep all emulator work off the trainer."""
     torch.set_num_threads(1)
@@ -43,7 +44,11 @@ def _worker_main(
         torch.set_num_interop_threads(1)
     except RuntimeError:
         pass
-    env = TH05CPUEnv(image, frame_interval_s=frame_interval_s)
+    env = TH05CPUEnv(
+        image,
+        frame_interval_s=frame_interval_s,
+        deathbomb_guard=deathbomb_safety,
+    )
     regular_bullet_shield = (
         AuditedRegularBulletShield(
             horizon_frames=regular_bullet_safety_horizon,
@@ -52,21 +57,40 @@ def _worker_main(
         if regular_bullet_safety_horizon > 0
         else None
     )
+    deathbomb_shield = DeathbombShield() if deathbomb_safety else None
 
     def action_mask_from_info(info):
         action_mask = info["action_mask"]
-        intervention = False
-        if regular_bullet_shield is not None:
-            action_mask, intervention = regular_bullet_shield.apply(
+        deathbomb_intervention = False
+        if deathbomb_shield is not None:
+            # Reserve the non-renewable bomb before geometric filtering. If
+            # geometry later has no movement solution, its fail-open path must
+            # not silently spend the reserved resource.
+            action_mask, deathbomb_intervention = deathbomb_shield.apply(
                 info["raw_frame"], action_mask
             )
-        return action_mask, intervention
+        regular_intervention = False
+        if regular_bullet_shield is not None:
+            action_mask, regular_intervention = regular_bullet_shield.apply(
+                info["raw_frame"], action_mask
+            )
+        return action_mask, regular_intervention, deathbomb_intervention
 
     try:
         observation, reset_info = env.reset(seed=seed)
         episode_deaths = 0
-        action_mask, intervention = action_mask_from_info(reset_info)
-        connection.send(("ready", observation, action_mask, intervention))
+        action_mask, regular_intervention, deathbomb_intervention = (
+            action_mask_from_info(reset_info)
+        )
+        connection.send(
+            (
+                "ready",
+                observation,
+                action_mask,
+                regular_intervention,
+                deathbomb_intervention,
+            )
+        )
         while True:
             command, payload = connection.recv()
             if command == "close":
@@ -79,16 +103,23 @@ def _worker_main(
             terminal_flag = int(info["end_flag"])
             scaled_reward = info["scaled_reward_vector"]
             miss_event = bool(info["miss_event"])
+            online_deathbomb_intervention = bool(
+                info.get("deathbomb_intervention", False)
+            )
             episode_deaths += int(miss_event)
             no_miss_success = bool(
                 done and terminal_flag == 2 and episode_deaths == 0
             )
             if done:
                 observation, reset_info = env.reset()
-                action_mask, intervention = action_mask_from_info(reset_info)
+                action_mask, regular_intervention, deathbomb_intervention = (
+                    action_mask_from_info(reset_info)
+                )
                 episode_deaths = 0
             else:
-                action_mask, intervention = action_mask_from_info(info)
+                action_mask, regular_intervention, deathbomb_intervention = (
+                    action_mask_from_info(info)
+                )
             connection.send(
                 (
                     "step",
@@ -99,7 +130,9 @@ def _worker_main(
                     action_mask,
                     no_miss_success,
                     miss_event,
-                    intervention,
+                    regular_intervention,
+                    deathbomb_intervention,
+                    online_deathbomb_intervention,
                 )
             )
     except BaseException:
@@ -119,6 +152,7 @@ class WorkerPool:
         timeout_s: float,
         regular_bullet_safety_horizon: int = 0,
         regular_bullet_safety_margin: float = 0.0,
+        deathbomb_safety: bool = False,
     ):
         context = mp.get_context("spawn")
         self.timeout_s = timeout_s
@@ -135,6 +169,7 @@ class WorkerPool:
                     seed + worker_id,
                     regular_bullet_safety_horizon,
                     regular_bullet_safety_margin,
+                    deathbomb_safety,
                 ),
                 daemon=True,
             )
@@ -146,6 +181,7 @@ class WorkerPool:
         observations = []
         action_masks = []
         regular_bullet_interventions = []
+        deathbomb_interventions = []
         try:
             for worker_id, connection in enumerate(self.connections):
                 if not connection.poll(self.timeout_s):
@@ -158,6 +194,7 @@ class WorkerPool:
                 observations.append(message[1])
                 action_masks.append(message[2])
                 regular_bullet_interventions.append(message[3])
+                deathbomb_interventions.append(message[4])
         except BaseException:
             self.close()
             raise
@@ -166,6 +203,10 @@ class WorkerPool:
         self.regular_bullet_interventions = np.asarray(
             regular_bullet_interventions, dtype=np.bool_
         )
+        self.deathbomb_interventions = np.asarray(
+            deathbomb_interventions, dtype=np.bool_
+        )
+        self.online_deathbomb_interventions = np.zeros(workers, dtype=np.bool_)
 
     def step(self, actions: np.ndarray):
         for connection, action in zip(self.connections, actions, strict=True):
@@ -179,7 +220,11 @@ class WorkerPool:
             no_miss_successes,
             miss_events,
             regular_bullet_interventions,
+            deathbomb_interventions,
+            online_deathbomb_interventions,
         ) = (
+            [],
+            [],
             [],
             [],
             [],
@@ -207,6 +252,8 @@ class WorkerPool:
                 no_miss_success,
                 miss_event,
                 regular_bullet_intervention,
+                deathbomb_intervention,
+                online_deathbomb_intervention,
             ) = message
             observations.append(observation)
             rewards.append(reward)
@@ -216,10 +263,18 @@ class WorkerPool:
             no_miss_successes.append(no_miss_success)
             miss_events.append(miss_event)
             regular_bullet_interventions.append(regular_bullet_intervention)
+            deathbomb_interventions.append(deathbomb_intervention)
+            online_deathbomb_interventions.append(online_deathbomb_intervention)
         self.observations = np.stack(observations).astype(np.float32, copy=False)
         self.action_masks = np.stack(action_masks).astype(np.bool_, copy=False)
         self.regular_bullet_interventions = np.asarray(
             regular_bullet_interventions, dtype=np.bool_
+        )
+        self.deathbomb_interventions = np.asarray(
+            deathbomb_interventions, dtype=np.bool_
+        )
+        self.online_deathbomb_interventions = np.asarray(
+            online_deathbomb_interventions, dtype=np.bool_
         )
         return (
             self.observations,
@@ -229,6 +284,7 @@ class WorkerPool:
             self.action_masks,
             np.asarray(no_miss_successes, dtype=np.bool_),
             np.asarray(miss_events, dtype=np.bool_),
+            self.online_deathbomb_interventions,
         )
 
     def close(self) -> None:
@@ -507,6 +563,11 @@ def train(args: argparse.Namespace) -> None:
             args.regular_bullet_safety_margin,
         ):
             raise ValueError("regular bullet safety settings must match when resuming")
+        saved_deathbomb_safety = bool(
+            resume_checkpoint.get("args", {}).get("deathbomb_safety", False)
+        )
+        if saved_deathbomb_safety != args.deathbomb_safety:
+            raise ValueError("deathbomb safety setting must match when resuming")
         saved_risk_enabled = resume_checkpoint.get("future_miss_head") is not None
         if saved_risk_enabled != risk_enabled:
             raise ValueError(
@@ -553,6 +614,7 @@ def train(args: argparse.Namespace) -> None:
         args.worker_timeout,
         args.regular_bullet_safety_horizon,
         args.regular_bullet_safety_margin,
+        args.deathbomb_safety,
     )
     observation = pool.observations
     action_mask = pool.action_masks
@@ -596,9 +658,14 @@ def train(args: argparse.Namespace) -> None:
             miss_events = np.empty(
                 (args.rollout_steps, args.workers), dtype=np.bool_
             )
+            policy_valid = np.empty(
+                (args.rollout_steps, args.workers), dtype=np.bool_
+            )
             removed_probability_mass = 0.0
             emergency_bomb_interventions = 0
             regular_bullet_interventions = 0
+            deathbomb_interventions = 0
+            online_deathbomb_overrides = 0
             successes = failures = no_miss_successes = 0
 
             model.eval()
@@ -607,11 +674,16 @@ def train(args: argparse.Namespace) -> None:
                 hidden_states[step] = hidden[0].numpy()
                 effective_action_mask = (
                     action_mask.copy()
-                    if args.hard_safety or args.regular_bullet_safety_horizon > 0
+                    if args.hard_safety
+                    or args.regular_bullet_safety_horizon > 0
+                    or args.deathbomb_safety
                     else np.ones_like(action_mask, dtype=np.bool_)
                 )
                 regular_bullet_interventions += int(
                     np.count_nonzero(pool.regular_bullet_interventions)
+                )
+                sampled_deathbomb_interventions = (
+                    pool.deathbomb_interventions.copy()
                 )
                 if bomb_shield is not None:
                     effective_action_mask, interventions = bomb_shield.apply(
@@ -643,11 +715,26 @@ def train(args: argparse.Namespace) -> None:
                     action_mask,
                     step_no_miss_successes,
                     step_miss_events,
+                    online_deathbomb_interventions,
                 ) = pool.step(actions[step])
                 rewards[step] = _add_extra_miss_cost(
                     reward, step_miss_events, args.extra_miss_penalty
                 )
                 miss_events[step] = step_miss_events
+                # A mid-transaction native override creates a valid transition
+                # for the shielded value function, but the return cannot be
+                # attributed to the originally sampled categorical action.
+                online_overrides = online_deathbomb_interventions & (
+                    actions[step] != 18
+                )
+                online_deathbomb_overrides += int(np.count_nonzero(online_overrides))
+                policy_valid[step] = ~online_overrides
+                deathbomb_interventions += int(
+                    np.count_nonzero(
+                        sampled_deathbomb_interventions
+                        | online_deathbomb_interventions
+                    )
+                )
                 dones[step] = done
                 successes += int(np.count_nonzero(flags == 2))
                 no_miss_successes += int(np.count_nonzero(step_no_miss_successes))
@@ -671,9 +758,12 @@ def train(args: argparse.Namespace) -> None:
                 args.gae_lambda,
             )
             scalar_advantages = advantages @ objective_weights
+            valid_advantages = scalar_advantages[policy_valid]
+            if not len(valid_advantages):
+                raise RuntimeError("every rollout transition was overridden by safety")
             scalar_advantages = (
-                scalar_advantages - scalar_advantages.mean()
-            ) / (scalar_advantages.std() + 1e-8)
+                scalar_advantages - valid_advantages.mean()
+            ) / (valid_advantages.std() + 1e-8)
             risk_targets = risk_valid = None
             if risk_head is not None:
                 risk_targets, risk_valid = _future_miss_targets(
@@ -693,6 +783,7 @@ def train(args: argparse.Namespace) -> None:
             old_value_sequences = _as_sequences(values, sequence_length)
             done_sequences = _as_sequences(dones, sequence_length)
             action_mask_sequences = _as_sequences(action_masks, sequence_length)
+            policy_valid_sequences = _as_sequences(policy_valid, sequence_length)
             risk_target_sequences = (
                 _as_sequences(risk_targets, sequence_length)
                 if risk_targets is not None
@@ -742,6 +833,9 @@ def train(args: argparse.Namespace) -> None:
                     action_mask_batch = torch.from_numpy(
                         action_mask_sequences[indices]
                     ).reshape(-1, 19)
+                    policy_valid_batch = torch.from_numpy(
+                        policy_valid_sequences[indices]
+                    ).reshape(-1)
                     hidden_batch = torch.from_numpy(initial_hidden[indices]).unsqueeze(0)
 
                     auxiliary_loss = torch.zeros(())
@@ -772,13 +866,17 @@ def train(args: argparse.Namespace) -> None:
                     new_log = distribution.log_prob(actions_batch)
                     log_ratio = new_log - old_log_batch
                     ratio = log_ratio.exp()
-                    policy_loss = -torch.minimum(
+                    policy_terms = -torch.minimum(
                         ratio * advantage_batch,
                         torch.clamp(
                             ratio, 1.0 - args.clip_epsilon, 1.0 + args.clip_epsilon
                         )
                         * advantage_batch,
-                    ).mean()
+                    )
+                    if torch.any(policy_valid_batch):
+                        policy_loss = policy_terms[policy_valid_batch].mean()
+                    else:
+                        policy_loss = logits.sum() * 0.0
 
                     clipped_values = old_value_batch + torch.clamp(
                         new_values - old_value_batch,
@@ -804,7 +902,12 @@ def train(args: argparse.Namespace) -> None:
                     )
                     optimizer.step()
 
-                    approximate_kl = float(((ratio - 1.0) - log_ratio).mean().item())
+                    kl_terms = (ratio - 1.0) - log_ratio
+                    approximate_kl = (
+                        float(kl_terms[policy_valid_batch].mean().item())
+                        if torch.any(policy_valid_batch)
+                        else 0.0
+                    )
                     epoch_kls.append(approximate_kl)
                     totals["policy"] += float(policy_loss.item())
                     totals["value"] += float(value_loss.item())
@@ -858,6 +961,10 @@ def train(args: argparse.Namespace) -> None:
                 "regular_bullet_safety_horizon": args.regular_bullet_safety_horizon,
                 "regular_bullet_safety_margin": args.regular_bullet_safety_margin,
                 "regular_bullet_interventions": regular_bullet_interventions,
+                "deathbomb_safety": args.deathbomb_safety,
+                "deathbomb_interventions": deathbomb_interventions,
+                "online_deathbomb_overrides": online_deathbomb_overrides,
+                "policy_valid_fraction": round(float(policy_valid.mean()), 6),
                 "action_frequency": (
                     np.bincount(actions.reshape(-1), minlength=19) / actions.size
                 ).round(4).tolist(),
@@ -874,6 +981,7 @@ def train(args: argparse.Namespace) -> None:
                     if args.hard_safety
                     or bomb_shield is not None
                     or args.regular_bullet_safety_horizon > 0
+                    or args.deathbomb_safety
                     else 0.0,
                     6,
                 ),
@@ -882,6 +990,7 @@ def train(args: argparse.Namespace) -> None:
                     if args.hard_safety
                     or bomb_shield is not None
                     or args.regular_bullet_safety_horizon > 0
+                    or args.deathbomb_safety
                     else 0.0,
                     6,
                 ),
@@ -991,6 +1100,11 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=0.0,
         help="extra pixels around ReC98's regular-bullet killbox",
+    )
+    parser.add_argument(
+        "--deathbomb-safety",
+        action="store_true",
+        help="reserve bombs and force one during TH05's audited eight-frame deathbomb window",
     )
     parser.add_argument(
         "--objective-weights",

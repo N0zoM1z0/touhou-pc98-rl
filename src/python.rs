@@ -190,7 +190,9 @@ impl RawFrame {
                     },
                     power: 0,
                     invincibility_time: 0,
+                    control_lock: 0,
                     invincible_via_bomb: false,
+                    player_is_hit: false,
                     miss_frame: 0,
                 },
                 bullets: vec![],
@@ -238,6 +240,14 @@ impl RawFrame {
             horizon_frames,
             extra_margin_px,
         ))
+    }
+
+    /// True only while TH05 can still cancel a registered collision with a
+    /// bomb: player_is_hit before registration, or miss_time 40 down to 33.
+    pub fn deathbomb_window_active(&self) -> bool {
+        !self.state.player.invincible_via_bomb
+            && (self.state.player.player_is_hit
+                || (33..=40).contains(&self.state.player.miss_frame))
     }
 }
 
@@ -315,6 +325,16 @@ impl MemoryWatcher {
     pub fn apply_action(&mut self, action: usize) -> PyResult<()> {
         self.inner
             .apply_action(action)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+    }
+
+    pub fn apply_action_guarded(
+        &mut self,
+        action: usize,
+        deathbomb_guard: bool,
+    ) -> PyResult<bool> {
+        self.inner
+            .apply_action_guarded(action, deathbomb_guard)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
     }
 
@@ -850,5 +870,21 @@ mod tests {
         assert!(regular_bullet_action_mask(&frame.state, 1, 0.0)[0]);
         assert!(!regular_bullet_action_mask(&frame.state, 2, 0.0)[0]);
         assert!(regular_bullet_action_mask(&frame.state, 2, 0.0)[1]);
+    }
+
+    #[test]
+    fn deathbomb_window_matches_th05_miss_timer() {
+        let mut frame = RawFrame::new();
+        frame.state.player.miss_frame = 40;
+        assert!(frame.deathbomb_window_active());
+        frame.state.player.miss_frame = 33;
+        assert!(frame.deathbomb_window_active());
+        frame.state.player.miss_frame = 32;
+        assert!(!frame.deathbomb_window_active());
+
+        frame.state.player.player_is_hit = true;
+        assert!(frame.deathbomb_window_active());
+        frame.state.player.invincible_via_bomb = true;
+        assert!(!frame.deathbomb_window_active());
     }
 }

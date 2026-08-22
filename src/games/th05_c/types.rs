@@ -250,7 +250,9 @@ pub struct PlayerState {
     pub pos: PlayfieldMotion,
     pub power: u8,
     pub invincibility_time: u16,
+    pub control_lock: u8,
     pub invincible_via_bomb: bool,
+    pub player_is_hit: bool,
     pub miss_frame: u16,
 }
 

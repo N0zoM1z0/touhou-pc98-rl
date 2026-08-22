@@ -26,6 +26,7 @@ TH05_KINEMATICS = KinematicSpec(
     velocity_scale=(12.0, 12.0),
     horizon_steps=60.0,
 )
+ACTION_REFRESH_INTERVAL_S = 0.001
 
 _MOVEMENT_DESCRIPTORS = (
     (0, 0),
@@ -155,6 +156,7 @@ class TH05CPUEnv(gym.Env):
         warmup_timeout_s: float = 5.0,
         spawn_retries: int = 3,
         dosbox_executable: str | Path | None = None,
+        deathbomb_guard: bool = False,
     ) -> None:
         super().__init__()
         self.image_template = Path(image_template).expanduser().resolve()
@@ -162,6 +164,8 @@ class TH05CPUEnv(gym.Env):
             raise FileNotFoundError(self.image_template)
 
         self.frame_interval_s = float(frame_interval_s)
+        if self.frame_interval_s <= 0.0:
+            raise ValueError("frame_interval_s must be positive")
         self.reward_scales = np.asarray(reward_scales, dtype=np.float32)
         self.reward_weights = np.asarray(reward_weights, dtype=np.float32)
         if self.reward_scales.shape != (3,) or self.reward_weights.shape != (3,):
@@ -169,6 +173,7 @@ class TH05CPUEnv(gym.Env):
 
         self.warmup_timeout_s = float(warmup_timeout_s)
         self.dosbox_executable = resolve_dosbox_executable(dosbox_executable)
+        self.deathbomb_guard = bool(deathbomb_guard)
         self.spawn_retries = int(spawn_retries)
         if self.spawn_retries < 1:
             raise ValueError("spawn_retries must be positive")
@@ -181,7 +186,6 @@ class TH05CPUEnv(gym.Env):
         self._working_image = Path(self._tempdir.name) / "game.hdi"
         self._watcher: _native.MemoryWatcher | None = None
         self._observation: np.ndarray | None = None
-        self._next_deadline = 0.0
         self._closed = False
 
     def _stop(self) -> None:
@@ -247,8 +251,10 @@ class TH05CPUEnv(gym.Env):
                     dosbox_executable=str(self.dosbox_executable),
                 )
                 observation, info = self._read_ready_state()
+                # Rollouts are synchronous transactions: TH05 must not advance
+                # while the learner is selecting an action or updating PPO.
+                self._watcher.pause_game()
                 self._observation = observation
-                self._next_deadline = time.monotonic()
                 return observation.copy(), info
             except RuntimeError as error:
                 last_error = error
@@ -265,14 +271,28 @@ class TH05CPUEnv(gym.Env):
         if not self.action_space.contains(action):
             raise ValueError(f"invalid action {action}")
 
-        self._watcher.apply_action(int(action))
-        self._next_deadline += self.frame_interval_s
-        now = time.monotonic()
-        if self._next_deadline > now:
-            time.sleep(self._next_deadline - now)
-        elif now - self._next_deadline > self.frame_interval_s:
-            # Do not accumulate scheduler lag after a slow inference/update.
-            self._next_deadline = now
+        # TH05 refreshes key_det from the physical keyboard every native frame,
+        # so a single process-memory write is timing-racy.  Keep submitting the
+        # selected command throughout the action window, then freeze the
+        # emulator before observing.  This also makes long PPO updates unable to
+        # advance the game without an agent action.
+        deathbomb_intervention = self._watcher.apply_action_guarded(
+            int(action), self.deathbomb_guard
+        )
+        deadline = time.monotonic() + self.frame_interval_s
+        self._watcher.resume_game()
+        try:
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0.0:
+                    break
+                time.sleep(min(ACTION_REFRESH_INTERVAL_S, remaining))
+                if time.monotonic() < deadline:
+                    deathbomb_intervention |= self._watcher.apply_action_guarded(
+                        int(action), self.deathbomb_guard
+                    )
+        finally:
+            self._watcher.pause_game()
 
         state = self._watcher.read_features()
         if state is None:
@@ -294,6 +314,7 @@ class TH05CPUEnv(gym.Env):
             "scaled_reward_vector": scaled_reward_vector,
             "raw_frame": raw_frame,
             "action_mask": TH05_CONSTRAINTS.valid_actions(observation),
+            "deathbomb_intervention": bool(deathbomb_intervention),
         }
         return observation.copy(), reward, terminated, False, info
 

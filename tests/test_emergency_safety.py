@@ -4,17 +4,25 @@ import numpy as np
 
 from pc98rl.env import ACTION_DIM, TH05_KINEMATICS
 from pc98rl.model import ENTITY_COUNT, ENTITY_DIM, FEATURE_DIM, GLOBAL_DIM
-from pc98rl.safety import AuditedRegularBulletShield, EmergencyBombShield
+from pc98rl.safety import (
+    AuditedRegularBulletShield,
+    DeathbombShield,
+    EmergencyBombShield,
+)
 
 
 class _FakeRawFrame:
-    def __init__(self, mask):
+    def __init__(self, mask, *, deathbomb=False):
         self.mask = mask
+        self.deathbomb = deathbomb
         self.calls = []
 
     def regular_bullet_action_mask(self, horizon_frames, extra_margin_px):
         self.calls.append((horizon_frames, extra_margin_px))
         return self.mask
+
+    def deathbomb_window_active(self):
+        return self.deathbomb
 
 
 class AuditedRegularBulletShieldTest(unittest.TestCase):
@@ -41,6 +49,39 @@ class AuditedRegularBulletShieldTest(unittest.TestCase):
         )
         np.testing.assert_array_equal(mask, base)
         self.assertFalse(intervened)
+
+
+class DeathbombShieldTest(unittest.TestCase):
+    def test_forces_bomb_inside_window(self):
+        base = np.ones(19, dtype=np.bool_)
+        mask, intervened = DeathbombShield().apply(
+            _FakeRawFrame(base, deathbomb=True), base
+        )
+        self.assertTrue(intervened)
+        self.assertEqual(np.flatnonzero(mask).tolist(), [18])
+
+    def test_does_not_intervene_without_a_legal_bomb(self):
+        base = np.ones(19, dtype=np.bool_)
+        base[18] = False
+        mask, intervened = DeathbombShield().apply(
+            _FakeRawFrame(base, deathbomb=True), base
+        )
+        self.assertFalse(intervened)
+        np.testing.assert_array_equal(mask, base)
+
+    def test_reserves_bomb_outside_window(self):
+        base = np.ones(19, dtype=np.bool_)
+        mask, intervened = DeathbombShield().apply(_FakeRawFrame(base), base)
+        self.assertFalse(intervened)
+        self.assertFalse(mask[18])
+        self.assertTrue(mask[:18].all())
+
+    def test_preserves_only_feasible_bomb(self):
+        base = np.zeros(19, dtype=np.bool_)
+        base[18] = True
+        mask, intervened = DeathbombShield().apply(_FakeRawFrame(base), base)
+        self.assertFalse(intervened)
+        np.testing.assert_array_equal(mask, base)
 
 
 class EmergencyBombShieldTest(unittest.TestCase):

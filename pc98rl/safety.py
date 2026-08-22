@@ -154,4 +154,31 @@ class AuditedRegularBulletShield:
         return combined, intervened
 
 
-__all__ = ["AuditedRegularBulletShield", "EmergencyBombShield"]
+class DeathbombShield:
+    """Reserve bombs, then force one inside TH05's audited eight-frame window."""
+
+    def apply(self, raw_frame, base_mask: np.ndarray) -> tuple[np.ndarray, bool]:
+        base_mask = np.asarray(base_mask, dtype=np.bool_)
+        if base_mask.shape != (19,):
+            raise ValueError("expected a 19-action base mask")
+        if raw_frame.deathbomb_window_active():
+            if not base_mask[18]:
+                return base_mask.copy(), False
+            mask = np.zeros_like(base_mask)
+            mask[18] = True
+            return mask, True
+
+        # The current categorical policy often spends all bombs before a hit.
+        # Reserving them makes the later exact cancellation executable. Keep a
+        # bomb feasible when an upstream shield has already ruled out every
+        # movement action; composition must never create an empty action set.
+        if not base_mask[18]:
+            return base_mask.copy(), False
+        if not base_mask[:18].any():
+            return base_mask.copy(), False
+        mask = base_mask.copy()
+        mask[18] = False
+        return mask, False
+
+
+__all__ = ["AuditedRegularBulletShield", "DeathbombShield", "EmergencyBombShield"]

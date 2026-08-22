@@ -1,4 +1,5 @@
 use crate::games::th05_c::key::{DiscreteAction, key_det_player_pos, shiftkey_player_pos};
+use crate::games::th05_c::offsets::TH05Offsets;
 use crate::games::th05_c::readers::*;
 use crate::games::th05_c::{DynAddressFinder, GameState, PlayerState};
 use crate::observation::schema1::ObservationBuilder;
@@ -92,14 +93,30 @@ impl TH05MemoryWatcher {
 
         let player_pos = playfield_motion(mem, player_pos_addr).ok()?;
         let power = mem.read_u8(player_pos_addr + 0x1E).ok()?;
-        let invincibility_time = mem.read_u16_le(player_pos_addr + 0x1C).ok()?;
-
+        let invincibility_time = mem
+            .read_u8(player_pos_addr + TH05Offsets::P2INVINCIBLE)
+            .ok()? as u16;
+        let control_lock = mem
+            .read_u8(player_pos_addr + TH05Offsets::P2CONTROL_LOCK)
+            .ok()?;
+        let player_is_hit = mem
+            .read_u8(player_pos_addr + TH05Offsets::P2PLAYER_IS_HIT)
+            .ok()?
+            != 0;
+        let miss_frame = mem
+            .read_u8(player_pos_addr + TH05Offsets::P2MISS_TIME)
+            .ok()? as u16;
         let player = PlayerState {
             pos: player_pos,
             power,
             invincibility_time,
+            control_lock,
+            // The bombing-flag offset has not been audited. Bomb
+            // invincibility is already covered by the exact invincibility
+            // timer, so do not manufacture a second value from a guessed map.
             invincible_via_bomb: false,
-            miss_frame: 0,
+            player_is_hit,
+            miss_frame,
         };
         // read all
         let bullets = bullets_addr
@@ -192,6 +209,33 @@ impl TH05MemoryWatcher {
         discrete_action.apply(self.finder.memory(), key_det_addr, shiftkey_addr)?; // call
         self.current_action = Some(action);
         Ok(())
+    }
+
+    /// Submit the policy action, preempting it with a bomb during TH05's exact
+    /// eight-frame deathbomb window. This check is intentionally native and
+    /// tiny so it can run in the online control loop independently of learner
+    /// latency.
+    pub fn apply_action_guarded(
+        &mut self,
+        action: usize,
+        deathbomb_guard: bool,
+    ) -> Result<bool, Box<dyn std::error::Error>> {
+        let player_pos = self
+            .finder
+            .addresses()
+            .player_pos
+            .ok_or("Player pos not found")?;
+        let intervene = if deathbomb_guard {
+            let mem = self.finder.memory();
+            let player_is_hit =
+                mem.read_u8(player_pos + TH05Offsets::P2PLAYER_IS_HIT)? != 0;
+            let miss_time = mem.read_u8(player_pos + TH05Offsets::P2MISS_TIME)?;
+            player_is_hit || (33..=40).contains(&miss_time)
+        } else {
+            false
+        };
+        self.apply_action(if intervene { 18 } else { action })?;
+        Ok(intervene)
     }
 
     pub fn release_action(&mut self) -> Result<(), Box<dyn std::error::Error>> {

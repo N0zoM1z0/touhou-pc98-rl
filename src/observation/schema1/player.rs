@@ -65,6 +65,7 @@ impl PlayerFeatures {
         let bombs_norm = (state.rem_bombs_internal as f32 / 8.0).clamp(0.0, 1.0);
 
         let invincible = if state.player.invincibility_time > 0
+            || state.player.control_lock > 0
             || state.player.invincible_via_bomb
             || state.player.miss_frame > 0
         {
