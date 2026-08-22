@@ -134,6 +134,7 @@ def evaluate(
     emergency_bomb_interventions = 0
     regular_bullet_interventions = 0
     deathbomb_interventions = 0
+    miss_events = []
     observation = np.zeros(env.observation_space.shape, dtype=np.float32)
     scenario = None
     try:
@@ -216,7 +217,20 @@ def evaluate(
             raw_frame = info["raw_frame"]
             scalar_return += reward
             reward_vector += info["reward_vector"]
-            deaths += int(info["miss_event"])
+            miss_event = bool(info["miss_event"])
+            deaths += int(miss_event)
+            if miss_event:
+                miss_events.append(
+                    {
+                        "step": completed_steps + 1,
+                        "boss_phase": raw_frame.boss_phase(),
+                        "boss_phase_frame": raw_frame.boss_phase_frame(),
+                        "boss_hp": raw_frame.boss_hp(),
+                        "power": int(round(float(observation[8]) * 128.0)),
+                        "lives": int(round(float(observation[9]) * 8.0)),
+                        "bombs": int(round(float(observation[10]) * 8.0)),
+                    }
+                )
             end_flag = int(info["end_flag"])
             completed_steps += 1
             if terminal or truncated:
@@ -233,6 +247,7 @@ def evaluate(
         "scalar_return": round(scalar_return, 6),
         "raw_reward": reward_vector.round(4).tolist(),
         "death_events": deaths,
+        "miss_events": miss_events,
         "terminal": bool(terminal),
         "success": success,
         "no_miss_success": success and deaths == 0,
