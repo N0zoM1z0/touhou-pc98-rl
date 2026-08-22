@@ -482,14 +482,31 @@ gain: the probe is early and safe, and no collision-time teacher has yet been
 trained. The record is
 `experiments/2026-08-22-th05-savestate-branching-probe.json`.
 
+The first high-risk comparison also rejects an easy labeling shortcut. An H6
+trigger at stage frame 427 marks one action unsafe if its velocity is held for
+six frames, but all 12 structurally legal actions survive a matched 26-frame
+actor continuation when the first action lasts the actual two-frame decision
+interval. H6 geometric exclusion is therefore not itself a causal current-action
+label.
+
+An H2 immediate-risk trigger is informative. At stage frame 439 it identifies
+seven unsafe actions. Of 12 structurally legal counterfactual actions, ten enter
+TH05's exact pending-hit window within two or four native frames, while actions
+3 and 12 survive the complete 26-frame continuation. Deathbomb rescue is
+disabled only inside these offline branches. This is the first action-dependent
+causal supervision result, but it is still one anchor rather than a trained or
+evaluated policy. Exact outcomes are in
+`experiments/2026-08-22-th05-high-risk-counterfactual-pilot.json` and
+`experiments/2026-08-22-th05-immediate-counterfactual-pilot.json`.
+
 ## Next experiments
 
 The highest-value next work is:
 
-1. Branch from paused emulator save states near audited high-risk decisions,
-   evaluate every legal action under matched short continuations, and distill
-   the resulting action-contrastive collision-time labels into the unchanged
-   deadline-bounded actor.
+1. Collect H2-triggered branches across many trajectories and anchors, reserve
+   untouched anchor groups for selection/held-out evaluation, then distill the
+   action-contrastive collision-time labels into the unchanged deadline-bounded
+   actor.
 2. Add compact normal-enemy tokens as a separately ablated information change;
    do not confound it with the counterfactual-supervision experiment.
 3. Audit special-projectile collision boxes before widening any predictive mask.

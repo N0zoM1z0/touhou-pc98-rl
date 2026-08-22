@@ -30,6 +30,8 @@ training/evaluation path is designed around reproducible CPU experiments.
   state from deployment artifacts.
 - An offline-only DOSBox-X save-state brancher with exact guest-frame stepping;
   repeated action sequences reproduce compact and raw game state byte-for-byte.
+- Action-contrastive high-risk probes that disable training-time rescue bombs
+  and label pending hits while leaving the deployed actor unchanged.
 - Eight-emulator CPU rollout at about 223 transitions/s on this host.
 
 TH01-04 are explicitly not claimed yet. The immediate target is TH05 Lunatic

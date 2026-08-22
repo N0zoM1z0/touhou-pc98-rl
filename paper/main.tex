@@ -912,6 +912,35 @@ observation by up to 0.375.  This validates deterministic branching, not a
 survival improvement; high-risk collision labels and distillation remain to be
 tested.
 
+The first high-risk probe shows why trigger semantics matter.  Table~\ref{tab:branch}
+holds the first action for the real two-native-frame decision interval and then
+uses the same deterministic actor continuation without bombs.  H6 marks one
+action unsafe under a six-frame constant-velocity projection, yet none of the
+12 structurally legal actions collide over the 26-frame branch.  We reject H6
+exclusion as a current-action label.  At an H2 trigger, by contrast, ten of 12
+legal actions enter the exact pending-hit window within two or four native
+frames, while actions 3 and 12 survive the complete continuation.  The emulator
+state, recurrent hidden state, continuation controller, and timing are matched;
+only the first action differs.
+
+\begin{table}[ht]
+  \centering
+  \caption{Single-anchor offline counterfactual feasibility probes.}
+  \label{tab:branch}
+  \begin{tabular}{lrrrrr}
+    \toprule
+    Trigger & Stage frame & Legal & Collision & Safe & Earliest hit \\
+    \midrule
+    H6 held-motion risk & 427 & 12 & 0 & 12 & -- \\
+    H2 immediate risk & 439 & 12 & 10 & 2 & 2 frames \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+This is causal-label feasibility, not policy improvement.  A multi-trajectory,
+group-held-out branch dataset and a distilled-actor evaluation are required
+before the labels count as learning evidence.
+
 The full-stage result separates completion from survival.  Table~\ref{tab:full-risk}
 uses a 7,000-step limit and the same explicit runtime safety configuration for
 both checkpoints.  An earlier attempted comparison inherited different
@@ -969,11 +998,13 @@ deployment.
 \end{table}
 
 Exact datasets, seeds, checksums, negative controls, and latency quantiles are
-recorded in three machine-readable files:
+recorded in five machine-readable files:
 \begin{itemize}
   \item \path{experiments/2026-08-22-th05-lunatic-offline-online.json};
   \item \path{experiments/2026-08-22-th05-lunatic-stage-boundary.json};
-  \item \path{experiments/2026-08-22-th05-savestate-branching-probe.json}.
+  \item \path{experiments/2026-08-22-th05-savestate-branching-probe.json};
+  \item \path{experiments/2026-08-22-th05-high-risk-counterfactual-pilot.json};
+  \item \path{experiments/2026-08-22-th05-immediate-counterfactual-pilot.json}.
 \end{itemize}
 
 \section{Threats to validity}
@@ -992,9 +1023,9 @@ recorded in three machine-readable files:
   only factual chosen-action outcomes.  Evaluating its score on all 19 actions
   is observational extrapolation, not counterfactual supervision; 2/8 versus
   0/8 pre-boss held-out no-miss clears remain an underpowered point estimate.
-  \item Exact save-state replay is so far verified at one early, safe pre-boss
-  anchor.  It does not establish that branching near a collision remains exact
-  or that its labels improve a distilled actor.
+  \item Exact replay is verified at an early pre-boss anchor and
+  action-dependent outcomes at one immediate-risk anchor.  Two trigger probes
+  do not establish multi-state coverage or improvement in a distilled actor.
   \item The comparison model has no reproducible compatible checkpoint, so
   systems comparisons do not imply a gameplay win over prior work.
   \item Learning evidence now includes the start of TH05 Stage 1 at low power
@@ -1084,12 +1115,11 @@ future-safety teacher moves held-out no-miss clears from 0/8 to 2/8 and misses
 from nine to seven.  On the complete stage it increases held-out clears from
 4/8 to 7/8, but both systems obtain zero no-miss clears and student misses rise
 from 12 to 13.  Its exported online path remains small at 1.474-ms p99.  The
-deterministic save-state substrate is now implemented and passes an early-state
-byte-exact replay probe.  The next teacher should restore audited high-risk
-states, try each legal action under matched short continuations, label collision
-time or survival, and
-distill the resulting action-contrastive distribution.  The branch evaluator,
-save states, and risk model remain absent from deployment.  This experiment is
+deterministic save-state substrate passes byte-exact replay, and the H2 pilot
+yields ten colliding versus two safe legal actions from the same high-risk
+anchor.  The next teacher should collect grouped multi-anchor collision-time
+labels and distill the resulting action-contrastive distribution.  The branch
+evaluator, save states, and risk model remain absent from deployment.  This experiment is
 rejected unless its advantage survives both actor distillation and untouched
 full-stage seeds.
 
@@ -1123,8 +1153,9 @@ from 12 to 13.  The exported 180,456-parameter actor contains neither optimizer
 nor risk head and its complete decision p99 is 1.474 ms on one CPU thread.
 This is evidence for the offline/online boundary and curriculum completion,
 not mastery.  Byte-exact save-state replay makes the next counterfactual data
-experiment operational without changing deployment.  The main scientific task
-is now action-contrastive offline
+experiment operational without changing deployment; one H2 anchor already
+separates ten colliding actions from two safe upward actions.  The main
+scientific task is now multi-anchor action-contrastive offline
 supervision under untouched full-stage evaluation, followed by the omitted
 normal-enemy observation and eventually TH01--04 adapters.
 
