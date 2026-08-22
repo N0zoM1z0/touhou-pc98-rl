@@ -634,6 +634,47 @@ and mask unsafe movement actions before falling back to a bomb.  Exact pilot
 values are in
 \path{experiments/2026-08-22-th05-lunatic-explicit-miss-cost.json}.
 
+\subsection{Audited regular-bullet action mask}
+
+We next replace the approximate nearest-object threshold with a native action
+mask derived from the TH05 collision implementation.  Regular bullets use an
+$8\times8$ square killbox.  A newly grazeable bullet must first enter an
+asymmetric box extending 16 pixels left, 20 right, and 22 vertically; its
+killbox becomes active only on a later frame.  Delay-cloud and decay states have
+no hitbox.  The adapter combines these states with character-specific focused
+and unfocused speed and predicts each of the 18 movement actions over six
+discrete native frames.  Bomb remains a policy-accounted action, and special
+projectiles are deliberately excluded rather than assigned an invented common
+hitbox.
+
+A four-seed calibration of the frozen miss-cost policy increases clears from
+2/4 to 4/4 and reduces total misses from nine to eight, but yields no no-miss
+clear.  We therefore fine-tune under the same mask for 32,768 transitions.
+Validation seeds 681--684 select update 8 with 4/4 clears, 1.5 mean misses, and
+mean return 2.727; all four candidate snapshots still have zero no-miss clears.
+
+\begin{table}[ht]
+  \centering
+  \caption{Audited-mask fine-tune on untouched seeds 691--698.}
+  \label{tab:audited-mask}
+  \begin{tabular}{lrrrr}
+    \toprule
+    System & Clears & No-miss & Misses & Mean return \\
+    \midrule
+    Miss-cost initializer & \textbf{8} & 0 & 15 & 2.458 \\
+    Shield-aware PPO, update 8 & \textbf{8} & 0 & \textbf{14} & \textbf{2.618} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The paired return gain in Table~\ref{tab:audited-mask} is
+$0.161\pm0.150$ standard error.  This is a small survival improvement and a
+useful curriculum scaffold, but it is not perfect play: neither system obtains
+a no-miss clear.  The residual deaths motivate auditing deathbomb timing and
+special-projectile collision rules rather than continuing the same PPO run.
+Machine-readable results are in
+\path{experiments/2026-08-22-th05-lunatic-audited-bullet-safety.json}.
+
 \section{Threats to validity}
 
 \begin{itemize}
@@ -652,6 +693,10 @@ values are in
   \item Host timing is measured while unrelated jobs are present.  CPU affinity
   and niceness reduce interference but do not produce a dedicated-machine
   benchmark.
+  \item API steps are paced by a wall-clock interval rather than synchronized
+  to an observed native-frame transition.  Setting that interval to zero makes
+  the policy loop outrun emulation and cannot be interpreted as additional
+  environment transitions.
 \end{itemize}
 
 \section{Research roadmap}
@@ -700,6 +745,13 @@ bullet activation and projectile-specific collision boxes, not a single
 nearest-object distance.  Report removed policy probability mass and evaluate
 every trained policy both with and without its shield.
 
+The audited regular-bullet mask improves a four-seed completion calibration
+and reduces untouched-test misses from 15 to 14, but both systems remain at
+0/8 no-miss.  H6 is therefore partially supported as a curriculum mechanism
+and rejected as a sufficient perfect-play solution.  The next registered
+extension must attribute deaths and add only audited special-projectile or
+deathbomb semantics.
+
 \paragraph{H7: old-five-games interface.}
 Define per-game contracts for observation schema, action meaning, terminal
 flags, executable identity, and reset.  TH01--04 enter the benchmark only after
@@ -714,9 +766,11 @@ research concerns.  The present system removes a large dense-map bottleneck,
 runs eight independent games at useful speed, and exhibits small-data
 improvements in short-phase completion and survival.  A future-miss auxiliary
 loss fails a held-out pilot, and an explicit miss cost improves ordinary
-completion without producing a no-miss clear.  The persistent gap motivates
-action-level audited safety and constrained survival learning rather than a
-claim of mastery.  The main scientific task is to turn this systems
+completion without producing a no-miss clear.  An audited regular-bullet mask
+then preserves 8/8 completion and reduces misses from 15 to 14, but again
+produces zero no-miss clears.  The persistent gap motivates hazard attribution,
+special-projectile and deathbomb semantics, and constrained survival learning
+rather than a claim of mastery.  The main scientific task is to turn this systems
 baseline into a pre-registered multi-configuration study with full-stage
 completion metrics.
 

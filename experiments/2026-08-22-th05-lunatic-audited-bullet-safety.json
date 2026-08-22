@@ -1,0 +1,105 @@
+{
+  "date": "2026-08-22",
+  "scenario": {
+    "stage": 1,
+    "patch_stage_index": 0,
+    "phase": 2,
+    "end_phase": 4,
+    "rank": 3,
+    "character": 2,
+    "power": 128,
+    "lives": 3,
+    "bombs": 3
+  },
+  "mechanism": {
+    "regular_bullet_killbox_px": [8, 8],
+    "graze_box_px": {"left": 16, "right": 20, "top": 22, "bottom": 22},
+    "graze_requires_previous_frame": true,
+    "cloud_and_decay_hitboxes_disabled": true,
+    "character_specific_motion": true,
+    "prediction": "constant velocity over discrete native frames",
+    "horizon_frames": 6,
+    "extra_margin_px": 0.0,
+    "scope": "regular bullets only; special projectiles are excluded"
+  },
+  "frozen_policy_calibration": {
+    "warning": "Policy seeds are matched, but the native game RNG is not separately controlled; these are not exact trajectory pairs.",
+    "seeds": [675, 676, 677, 678],
+    "baseline": {
+      "successes": 2,
+      "no_miss_successes": 0,
+      "deaths": 9,
+      "mean_return": 1.222875,
+      "interventions": 0
+    },
+    "horizon_6": {
+      "successes": 4,
+      "no_miss_successes": 0,
+      "deaths": 8,
+      "mean_return": 2.441875,
+      "interventions": 259
+    }
+  },
+  "training": {
+    "initialization": "models/survival/s1-lunatic-p2-p4-miss2-selected.pt",
+    "initialization_sha256": "9b87ffaef8baf293bf1ce6de36be5a141066b37c42ed953ecbd73675ff146bfc",
+    "seed": 9393,
+    "updates": 16,
+    "workers": 8,
+    "rollout_steps": 256,
+    "transitions": 32768,
+    "learning_rate": 0.0001,
+    "entropy_coefficient": 0.005,
+    "extra_miss_penalty": 2.0,
+    "epochs": 4,
+    "observed_successes": 19,
+    "observed_no_miss_successes": 0,
+    "observed_failures": 10,
+    "observed_misses": 126,
+    "observed_regular_bullet_interventions": 1885,
+    "wall_s": 277.329,
+    "mean_steps_per_s": 153.561875
+  },
+  "validation": {
+    "seeds": [681, 682, 683, 684],
+    "steps": 1600,
+    "selected_update": 8,
+    "selected_sha256": "101d24f43b24b36522593bbe16bd0d1e2b267114421f8b595e6ec88b4965ea6a",
+    "selected": {
+      "successes": 4,
+      "no_miss_successes": 0,
+      "mean_deaths": 1.5,
+      "mean_return": 2.726625,
+      "standard_error": 0.195145,
+      "selection_score": 2.53148
+    },
+    "later_regression": "Update 16 cleared only 3/4 and had 2.25 mean deaths."
+  },
+  "untouched_stochastic_test": {
+    "seeds": [691, 692, 693, 694, 695, 696, 697, 698],
+    "steps": 1600,
+    "baseline": {
+      "successes": 8,
+      "no_miss_successes": 0,
+      "deaths": 15,
+      "mean_return": 2.457812,
+      "return_standard_error": 0.080333
+    },
+    "shield_aware_policy": {
+      "successes": 8,
+      "no_miss_successes": 0,
+      "deaths": 14,
+      "mean_return": 2.618375,
+      "return_standard_error": 0.114004,
+      "interventions": 603
+    },
+    "paired_return_gain": 0.160562,
+    "paired_standard_error": 0.150095
+  },
+  "timing_diagnostic": {
+    "invalid_setting": "frame_interval_s=0",
+    "observation": "The agent loop outran the emulated native frame clock, producing 1600 repeated action samples without covering a complete phase-2 episode.",
+    "decision": "Do not report zero-interval runs as environment transitions; retain paced evaluation until native-frame synchronization is implemented."
+  },
+  "conclusion": "The audited mask improves completion in the calibration and slightly reduces misses after shield-aware fine-tuning, but produces zero no-miss clears on validation and untouched tests. It is retained as a curriculum scaffold, not accepted as perfect play. Audit deathbomb timing and special-projectile collisions next."
+}

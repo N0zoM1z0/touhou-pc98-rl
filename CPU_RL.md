@@ -377,14 +377,48 @@ numbers justify auditing exact native collision semantics rather than widening
 the approximate threshold. Full values are tracked in
 `experiments/2026-08-22-th05-lunatic-explicit-miss-cost.json`.
 
+### Audited regular-bullet safety: reliable clears, not perfect play
+
+The native adapter now exposes an action mask derived from TH05's ReC98
+collision rules. It uses the 8-by-8 regular-bullet killbox, the asymmetric
+16/20-by-22/22 graze box, the requirement that a bullet be grazed in a previous
+frame, cloud/decay activation states, per-character focused and unfocused
+movement speeds, and discrete native-frame prediction. The policy remains
+responsible for choosing among all certified movement actions and a legal bomb;
+the shield does not script a route. Special projectiles remain outside this
+mask and are an explicit limitation.
+
+A corrected four-seed frozen-policy calibration on seeds 675--678 improved
+completion from 2/4 to 4/4, reduced deaths from nine to eight, and increased
+mean return from 1.223 to 2.442 with 259 interventions. This justified training
+under the same mask rather than deploying an unfamiliar constraint only after
+training. A 32,768-transition fine-tune with seed 9393 selected update 8 on
+validation seeds 681--684: 4/4 clears, 1.5 mean deaths, mean return 2.727, but
+zero no-miss clears. Update 16 regressed to 3/4.
+
+On untouched seeds 691--698, both the miss-cost initializer and the selected
+shield-aware policy cleared 8/8. Deaths changed from 15 to 14 and mean return
+from 2.458 to 2.618; paired return gain was `+0.161 +/- 0.150` standard error.
+Both remained at 0/8 no-miss. The mask is therefore retained as a useful
+curriculum scaffold, but the perfect-play hypothesis is not supported. The
+next audit must cover deathbomb timing and special projectile hitboxes rather
+than extending this PPO run indefinitely. Full values are in
+`experiments/2026-08-22-th05-lunatic-audited-bullet-safety.json`.
+
+A timing diagnostic also rejected `frame_interval_s=0` as a throughput trick.
+The agent loop then outruns the DOSBox native frame clock and samples many
+actions against repeated game states; 1,600 API steps do not cover a full
+phase-2 episode. Until the adapter waits on an observed native-frame advance,
+formal training and evaluation retain the paced 36 ms step interval.
+
 ## Next experiments
 
 The highest-value next work is:
 
-1. Add action-level masks derived from audited TH05 collision boxes, bullet
-   activation states, and per-character movement; compare them with the
-   approximate bomb-only shield before advancing the curriculum.
-2. Implement a reset-aware sequence-block collector and verify its on-policy
+1. Audit deathbomb timing and special-projectile collision boxes, then attribute
+   remaining misses by hazard class before widening any predictive mask.
+2. Synchronize each environment step to an observed native-frame advance, then
+   implement a reset-aware sequence-block collector and verify its on-policy
    age bound before using its throughput result in algorithm comparisons.
 3. Add enemy tokens and evaluate the implemented time-to-collision features;
    the current 273-float schema
