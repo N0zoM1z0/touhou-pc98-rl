@@ -9,12 +9,77 @@ memory bandwidth on mostly redundant dense spatial maps.
 import torch
 from torch import nn
 
+from .contracts import KinematicSpec
+
 
 GLOBAL_DIM = 37
 ENTITY_COUNT = 16
 ENTITY_DIM = 7
 DROP_DIM = 12
 FEATURE_DIM = GLOBAL_DIM + 2 * ENTITY_COUNT * ENTITY_DIM + DROP_DIM
+KINEMATIC_DIM = 5
+
+
+def add_kinematic_features(
+    tokens: torch.Tensor,
+    player_velocity: torch.Tensor,
+    spec: KinematicSpec,
+) -> torch.Tensor:
+    """Append bounded constant-velocity collision geometry to entity tokens.
+
+    The native schema stores position in playfield units and both player and
+    entity velocity in units of 12 pixels per game frame.  Converting them back
+    to the same physical units is important: using normalized x/y directly
+    would distort trajectories because the playfield is not square.
+    """
+    if tokens.shape[-1] != ENTITY_DIM:
+        raise ValueError(f"expected {ENTITY_DIM}-float entity tokens")
+    if player_velocity.shape[-1] != 2:
+        raise ValueError("player_velocity must end in two components")
+
+    dx = tokens[..., 0] * spec.position_scale[0]
+    dy = tokens[..., 1] * spec.position_scale[1]
+    relative_vx = (
+        tokens[..., 2] - player_velocity[..., None, 0]
+    ) * spec.velocity_scale[0]
+    relative_vy = (
+        tokens[..., 3] - player_velocity[..., None, 1]
+    ) * spec.velocity_scale[1]
+
+    distance = torch.sqrt(dx.square() + dy.square()).clamp_min(1e-6)
+    speed_squared = relative_vx.square() + relative_vy.square()
+    radial_dot = dx * relative_vx + dy * relative_vy
+    approaching = (radial_dot < 0.0) & (speed_squared > 1e-8)
+    approaching_time = (-radial_dot / speed_squared.clamp_min(1e-8)).clamp(
+        0.0, spec.horizon_steps
+    )
+    time_to_closest = torch.where(
+        approaching,
+        approaching_time,
+        torch.full_like(approaching_time, spec.horizon_steps),
+    )
+    projection_time = torch.where(
+        approaching, approaching_time, torch.zeros_like(approaching_time)
+    )
+    closest_x = dx + relative_vx * projection_time
+    closest_y = dy + relative_vy * projection_time
+    miss_distance = torch.sqrt(closest_x.square() + closest_y.square())
+    relative_velocity_scale = sum(spec.velocity_scale)
+    closing_speed = (-radial_dot / distance / relative_velocity_scale).clamp(
+        -1.0, 1.0
+    )
+
+    derived = torch.stack(
+        (
+            (relative_vx / (2.0 * spec.velocity_scale[0])).clamp(-1.0, 1.0),
+            (relative_vy / (2.0 * spec.velocity_scale[1])).clamp(-1.0, 1.0),
+            closing_speed,
+            time_to_closest / spec.horizon_steps,
+            (miss_distance / spec.distance_scale).clamp(0.0, 1.0),
+        ),
+        dim=-1,
+    )
+    return torch.cat((tokens, derived), dim=-1)
 
 
 class EntitySetEncoder(nn.Module):
@@ -40,7 +105,7 @@ class EntitySetEncoder(nn.Module):
         # value is normalized distance.  Looking at all seven values would mark
         # every padding token as present and dilute the useful nearest entities.
         mask = (tokens[..., :6].abs().sum(dim=-1) > 1e-7) | (
-            tokens[..., -1] < 1.0 - 1e-7
+            tokens[..., 6] < 1.0 - 1e-7
         )
         encoded = self.token_net(tokens)
 
@@ -60,8 +125,16 @@ class EntitySetEncoder(nn.Module):
 class CompactFeatureEncoder(nn.Module):
     output_dim = 128
 
-    def __init__(self):
+    def __init__(
+        self,
+        analytic_geometry: bool = False,
+        kinematic_spec: KinematicSpec | None = None,
+    ):
         super().__init__()
+        self.analytic_geometry = analytic_geometry
+        if analytic_geometry and kinematic_spec is None:
+            raise ValueError("analytic geometry requires an adapter KinematicSpec")
+        self.kinematic_spec = kinematic_spec
         self.global_net = nn.Sequential(
             nn.Linear(GLOBAL_DIM, 64),
             nn.LayerNorm(64),
@@ -69,8 +142,9 @@ class CompactFeatureEncoder(nn.Module):
             nn.Linear(64, 64),
             nn.SiLU(),
         )
-        self.projectile_net = EntitySetEncoder()
-        self.bullet_net = EntitySetEncoder()
+        token_dim = ENTITY_DIM + (KINEMATIC_DIM if analytic_geometry else 0)
+        self.projectile_net = EntitySetEncoder(token_dim=token_dim)
+        self.bullet_net = EntitySetEncoder(token_dim=token_dim)
         self.drop_net = nn.Sequential(nn.Linear(DROP_DIM, 16), nn.SiLU())
         self.fusion = nn.Sequential(
             nn.Linear(64 + 64 + 64 + 16, self.output_dim),
@@ -94,6 +168,14 @@ class CompactFeatureEncoder(nn.Module):
             *features.shape[:-1], ENTITY_COUNT, ENTITY_DIM
         )
         drops = features[..., drop_start:]
+        if self.analytic_geometry:
+            player_velocity = global_features[..., 2:4]
+            projectiles = add_kinematic_features(
+                projectiles, player_velocity, self.kinematic_spec
+            )
+            bullets = add_kinematic_features(
+                bullets, player_velocity, self.kinematic_spec
+            )
 
         return self.fusion(
             torch.cat(
@@ -117,6 +199,8 @@ class EntityActorCritic(nn.Module):
         action_dim: int = 19,
         hidden_size: int = 128,
         num_objectives: int = 3,
+        analytic_geometry: bool = False,
+        kinematic_spec: KinematicSpec | None = None,
     ):
         super().__init__()
         if feature_dim != FEATURE_DIM:
@@ -124,7 +208,11 @@ class EntityActorCritic(nn.Module):
         self.hidden_size = hidden_size
         self.gru_hidden_size = hidden_size
         self.num_objectives = num_objectives
-        self.encoder = CompactFeatureEncoder()
+        self.analytic_geometry = analytic_geometry
+        self.encoder = CompactFeatureEncoder(
+            analytic_geometry=analytic_geometry,
+            kinematic_spec=kinematic_spec,
+        )
         self.gru = nn.GRU(self.encoder.output_dim, hidden_size, batch_first=True)
         self.actor = nn.Sequential(
             nn.Linear(hidden_size, 128), nn.SiLU(), nn.Linear(128, action_dim)

@@ -52,6 +52,17 @@ def main() -> None:
     if len(set(args.seeds)) != len(args.seeds):
         parser.error("seeds must be unique")
 
+    baseline_geometry = False
+    baseline_safety = False
+    if args.baseline == "untrained":
+        import torch
+
+        saved = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
+        baseline_geometry = bool(
+            saved.get("args", {}).get("analytic_geometry", False)
+        )
+        baseline_safety = bool(saved.get("args", {}).get("hard_safety", False))
+
     baseline_results = []
     checkpoint_results = []
     for seed in args.seeds:
@@ -61,6 +72,8 @@ def main() -> None:
             deterministic=args.deterministic,
             steps=args.steps,
             seed=seed,
+            analytic_geometry=baseline_geometry,
+            hard_safety=baseline_safety,
         )
         checkpoint = evaluate(
             image=args.image,

@@ -18,10 +18,13 @@ training/evaluation path is designed around reproducible CPU experiments.
 - A 180,136-parameter entity-set encoder, GRU policy, and three-value critic.
 - Recurrent PPO with vector GAE, value clipping, KL stopping, snapshots, and
   multi-seed lower-confidence-bound checkpoint selection.
+- Optional analytic relative-motion features and adapter-certified hard action
+  masks applied consistently during rollout and optimization.
 - Eight-emulator CPU rollout at about 223 transitions/s on this host.
 
-TH01-04 are explicitly not claimed yet. They need their own verified memory and
-termination adapters behind the same environment interface.
+TH01-04 are explicitly not claimed yet. The immediate target is TH05 Lunatic
+completion and then no-miss completion; cross-game transfer remains a later
+research question requiring verified per-game adapters.
 
 ## Quick start
 
@@ -40,7 +43,8 @@ make test
 export PATH="$PWD/external/dosbox-x-install/bin:$PATH"
 CUDA_VISIBLE_DEVICES='' nice -n 10 taskset -c 0-47 \
   xvfb-run --auto-servernum uv run python -m pc98rl.ppo \
-  --image external/th05-rl.hdi --workers 8 --threads 8
+  --image external/th05-rl.hdi --workers 8 --threads 8 \
+  --analytic-geometry --hard-safety
 ```
 
 See [CPU_RL.md](CPU_RL.md) for the full setup, benchmark methodology, honest

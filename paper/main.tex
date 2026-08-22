@@ -42,7 +42,7 @@ the current TH05 adapter toward a common TH01--05 research framework.
 
 \section{Research questions}
 
-This project is organized around four falsifiable research questions.
+This project is organized around five falsifiable research questions.
 
 \begin{description}
   \item[RQ1: Systems feasibility.] Can an unmodified emulator plus structured
@@ -56,13 +56,18 @@ This project is organized around four falsifiable research questions.
   \item[RQ3: Learning signal.] Under a small CPU budget, does recurrent PPO
   improve survival and resource management over a paired untrained policy?
 
-  \item[RQ4: Generality.] Which interfaces can be shared by Touhou 1--5, and
+  \item[RQ4: Safe exploration.] Do adapter-certified hard action constraints
+  improve sample efficiency without merely hiding an unsafe policy?
+
+  \item[RQ5: Generality.] Which interfaces can be shared by Touhou 1--5, and
   which memory, termination, reward, and patching components must remain
   game-specific?
 \end{description}
 
 The present evidence addresses RQ1 strongly, RQ2 at the systems level, and RQ3
-only preliminarily.  RQ4 remains a design target: only TH05 is validated.
+only preliminarily.  RQ4 is now implemented as an experimental ablation but has
+no comparative result yet.  RQ5 is deliberately deferred until the agent can
+complete TH05 on its highest difficulty; only TH05 is currently validated.
 
 \section{Background and related work}
 
@@ -121,6 +126,9 @@ means inadequate for the stated experimental setting, not universally wrong.
     No deadline for a live-but-stalled worker & The learner can wait forever
     while leaving emulator children behind & Bounded startup/step IPC and exact
     cleanup \\
+    Readable memory implies rollout readiness & About 80 opening action slots
+    ignore control but still emit survival reward & Reset gate waits for the
+    player input lock to end \\
     \bottomrule
   \end{tabular}
 \end{table}
@@ -151,6 +159,15 @@ and world-writable build directories.  Our runner instead uses child-process
 tracing, finite deadlines, deterministic cleanup, and ordinary user
 permissions.  These changes reduce both stalled experiments and accidental
 interference with unrelated jobs.
+
+Memory readability is also weaker than actionability.  In a live directional
+probe, the initial player state was readable immediately but remained fixed for
+about 80 action intervals while the opening invincibility/input lock was active.
+The baseline collector records this prefix and attributes its survival reward
+to sampled actions that the game cannot execute.  Our reset gate waits for both
+an initialized player and the end of this lock.  A sustained-left/right probe
+then moved normalized X from 0.50 to 0 and back beyond 0.62, independently
+confirming that the subsequent action path is effective.
 
 \subsection{CPU cost is determined by representation}
 
@@ -261,6 +278,15 @@ a validation seed set using
 \end{equation}
 after prioritizing observed stage successes.  Thus the last PPO update is not
 automatically considered the best model.
+
+Two post-baseline extensions are exposed for controlled ablation.  Analytic
+geometry appends bounded constant-velocity closest-approach features using
+physical scales supplied by the game adapter.  Hard safety masks only actions
+the adapter can certify as unavailable or behaviorally redundant---currently a
+bomb with zero stock and movement into an active boundary clamp.  The masked
+categorical is renormalized identically during rollout and PPO optimization,
+and removed probability mass is logged.  It does not implement scripted
+collision avoidance.
 
 \section{Experimental protocol}
 
@@ -408,14 +434,17 @@ snapshots, validation-based selection, and an untouched test split.
 The next experiments are specified as hypotheses rather than assumed upgrades.
 
 \paragraph{H1: richer compact geometry.}
-Add normal-enemy tokens and analytic time-to-collision features while keeping
-the observation below 2 KiB.  Compare against the 273-float schema with matched
-training transitions and validation/test splits.
+Evaluate the implemented closest-approach features, then add normal-enemy
+tokens while keeping the observation below 2 KiB.  Compare each addition
+against the 273-float schema with matched training transitions and
+validation/test splits.
 
-\paragraph{H2: curriculum and generalization.}
-Randomize stage, phase, character, rank, power, lives, and bombs.  Use stage
-completion and resource-normalized completion as primary metrics.  Hold out
-entire configurations, not only sampling seeds.
+\paragraph{H2: TH05 Lunatic mastery.}
+Train a stage/phase curriculum that ends at rank 3 with no privileged starting
+resources.  Promote a policy only after stage completion, then optimize no-miss
+completion and finally full-game completion.  Use completion and
+resource-normalized completion as primary metrics rather than short-prefix
+return.
 
 \paragraph{H3: reset-aware collection.}
 When terminals become common, replace global synchronous waiting with an
@@ -427,10 +456,16 @@ Compare the fixed scalarization with constrained or distributional survival
 objectives.  Any method must report the full reward vector and may not hide a
 survival regression behind score gain.
 
-\paragraph{H5: old-five-games interface.}
+\paragraph{H5: adapter-certified safety.}
+Compare no mask, exact resource/boundary constraints, and any future predictive
+shield at matched training budgets.  Report removed policy probability mass
+and evaluate every trained policy both with and without its shield.
+
+\paragraph{H6: old-five-games interface.}
 Define per-game contracts for observation schema, action meaning, terminal
 flags, executable identity, and reset.  TH01--04 enter the benchmark only after
-live parser/action tests pass; shared code alone is not evidence of support.
+live parser/action tests pass and TH05 mastery has been addressed; shared code
+alone is not evidence of support.
 
 \section{Conclusion}
 

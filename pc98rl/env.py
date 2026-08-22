@@ -12,12 +12,69 @@ import gymnasium as gym
 import numpy as np
 from . import _native
 
+from .contracts import ActionDescriptor, ConstraintProvider, KinematicSpec
 from .model import FEATURE_DIM
 
 
 ACTION_DIM = 19
 DEFAULT_REWARD_SCALES = np.asarray((0.01, 0.001, 0.01), dtype=np.float32)
 DEFAULT_REWARD_WEIGHTS = np.asarray((1.0, 1.0, 0.25), dtype=np.float32)
+TH05_KINEMATICS = KinematicSpec(
+    position_scale=(384.0, 368.0),
+    velocity_scale=(12.0, 12.0),
+    horizon_steps=60.0,
+)
+
+_MOVEMENT_DESCRIPTORS = (
+    (0, 0),
+    (-1, 0),
+    (1, 0),
+    (0, -1),
+    (0, 1),
+    (-1, -1),
+    (-1, 1),
+    (1, -1),
+    (1, 1),
+)
+TH05_ACTIONS = tuple(
+    ActionDescriptor(move_x=x, move_y=y, primary=primary)
+    for primary in (False, True)
+    for x, y in _MOVEMENT_DESCRIPTORS
+) + (ActionDescriptor(bomb=True),)
+
+
+class TH05Constraints(ConstraintProvider):
+    """Exact availability and clamp-equivalence constraints for TH05 actions."""
+
+    boundary_epsilon = 1e-7
+
+    def valid_actions(self, observation: np.ndarray) -> np.ndarray:
+        observation = np.asarray(observation, dtype=np.float32)
+        if observation.shape[-1] != FEATURE_DIM:
+            raise ValueError(f"expected {FEATURE_DIM} features")
+        mask = np.ones((*observation.shape[:-1], ACTION_DIM), dtype=np.bool_)
+        left_blocked = observation[..., 4] <= self.boundary_epsilon
+        right_blocked = observation[..., 5] <= self.boundary_epsilon
+        top_blocked = observation[..., 6] <= self.boundary_epsilon
+        bottom_blocked = observation[..., 7] <= self.boundary_epsilon
+        for action, descriptor in enumerate(TH05_ACTIONS[:-1]):
+            blocked = np.zeros(observation.shape[:-1], dtype=np.bool_)
+            if descriptor.move_x < 0:
+                blocked |= left_blocked
+            elif descriptor.move_x > 0:
+                blocked |= right_blocked
+            if descriptor.move_y < 0:
+                blocked |= top_blocked
+            elif descriptor.move_y > 0:
+                blocked |= bottom_blocked
+            mask[..., action] &= ~blocked
+
+        # Bombs are the only truly resource-gated command in this adapter.
+        mask[..., -1] = observation[..., 10] > self.boundary_epsilon
+        return mask
+
+
+TH05_CONSTRAINTS = TH05Constraints()
 
 
 class TH05CPUEnv(gym.Env):
@@ -86,20 +143,26 @@ class TH05CPUEnv(gym.Env):
                 observation = np.asarray(features, dtype=np.float32)
                 if observation.shape == (FEATURE_DIM,):
                     last_state = (observation, end_flag, rewards, raw_frame)
-                    # The resident exists slightly before MAIN initializes the
-                    # player.  A positive Y coordinate distinguishes gameplay
-                    # from that short loader window.
-                    if observation[1] > 0.01:
+                    # The resident exists before MAIN initializes the player,
+                    # and a new stage then spends roughly three seconds in an
+                    # invincible input lock.  Returning that prefix gives PPO
+                    # survival reward for actions the game cannot execute.
+                    if observation[1] > 0.01 and observation[11] < 0.5:
                         break
             time.sleep(0.01)
 
-        if last_state is None or last_state[0][1] <= 0.01:
-            raise RuntimeError("TH05 started but did not reach an initialized gameplay state")
+        if (
+            last_state is None
+            or last_state[0][1] <= 0.01
+            or last_state[0][11] >= 0.5
+        ):
+            raise RuntimeError("TH05 started but did not reach a controllable gameplay state")
         observation, end_flag, rewards, raw_frame = last_state
         return observation, {
             "end_flag": int(end_flag),
             "reward_vector": np.asarray(rewards, dtype=np.float32),
             "raw_frame": raw_frame,
+            "action_mask": TH05_CONSTRAINTS.valid_actions(observation),
         }
 
     def reset(
@@ -166,6 +229,7 @@ class TH05CPUEnv(gym.Env):
             "reward_vector": reward_vector,
             "scaled_reward_vector": scaled_reward_vector,
             "raw_frame": raw_frame,
+            "action_mask": TH05_CONSTRAINTS.valid_actions(observation),
         }
         return observation.copy(), reward, terminated, False, info
 
@@ -177,4 +241,10 @@ class TH05CPUEnv(gym.Env):
         self._closed = True
 
 
-__all__ = ["ACTION_DIM", "TH05CPUEnv"]
+__all__ = [
+    "ACTION_DIM",
+    "TH05_ACTIONS",
+    "TH05_CONSTRAINTS",
+    "TH05_KINEMATICS",
+    "TH05CPUEnv",
+]

@@ -15,9 +15,9 @@ os.environ.setdefault("CUDA_VISIBLE_DEVICES", "")
 import numpy as np
 import torch
 from torch import nn
-from torch.distributions import Categorical
 
-from .env import DEFAULT_REWARD_WEIGHTS, TH05CPUEnv
+from .distributions import MaskedCategorical
+from .env import DEFAULT_REWARD_WEIGHTS, TH05CPUEnv, TH05_KINEMATICS
 from .model import FEATURE_DIM, EntityActorCritic
 
 
@@ -30,8 +30,8 @@ def _worker_main(connection, image: str, frame_interval_s: float, seed: int) -> 
         pass
     env = TH05CPUEnv(image, frame_interval_s=frame_interval_s)
     try:
-        observation, _ = env.reset(seed=seed)
-        connection.send(("ready", observation))
+        observation, reset_info = env.reset(seed=seed)
+        connection.send(("ready", observation, reset_info["action_mask"]))
         while True:
             command, payload = connection.recv()
             if command == "close":
@@ -44,9 +44,19 @@ def _worker_main(connection, image: str, frame_interval_s: float, seed: int) -> 
             terminal_flag = int(info["end_flag"])
             scaled_reward = info["scaled_reward_vector"]
             if done:
-                observation, _ = env.reset()
+                observation, reset_info = env.reset()
+                action_mask = reset_info["action_mask"]
+            else:
+                action_mask = info["action_mask"]
             connection.send(
-                ("step", observation, scaled_reward, done, terminal_flag)
+                (
+                    "step",
+                    observation,
+                    scaled_reward,
+                    done,
+                    terminal_flag,
+                    action_mask,
+                )
             )
     except BaseException:
         connection.send(("error", traceback.format_exc()))
@@ -81,6 +91,7 @@ class WorkerPool:
             self.connections.append(parent)
 
         observations = []
+        action_masks = []
         try:
             for worker_id, connection in enumerate(self.connections):
                 if not connection.poll(self.timeout_s):
@@ -91,15 +102,17 @@ class WorkerPool:
                 if message[0] == "error":
                     raise RuntimeError(f"worker {worker_id} failed:\n{message[1]}")
                 observations.append(message[1])
+                action_masks.append(message[2])
         except BaseException:
             self.close()
             raise
         self.observations = np.stack(observations).astype(np.float32, copy=False)
+        self.action_masks = np.stack(action_masks).astype(np.bool_, copy=False)
 
     def step(self, actions: np.ndarray):
         for connection, action in zip(self.connections, actions, strict=True):
             connection.send(("step", int(action)))
-        observations, rewards, dones, flags = [], [], [], []
+        observations, rewards, dones, flags, action_masks = [], [], [], [], []
         for worker_id, connection in enumerate(self.connections):
             if not connection.poll(self.timeout_s):
                 raise TimeoutError(
@@ -108,17 +121,20 @@ class WorkerPool:
             message = connection.recv()
             if message[0] == "error":
                 raise RuntimeError(f"worker {worker_id} failed:\n{message[1]}")
-            _, observation, reward, done, flag = message
+            _, observation, reward, done, flag, action_mask = message
             observations.append(observation)
             rewards.append(reward)
             dones.append(done)
             flags.append(flag)
+            action_masks.append(action_mask)
         self.observations = np.stack(observations).astype(np.float32, copy=False)
+        self.action_masks = np.stack(action_masks).astype(np.bool_, copy=False)
         return (
             self.observations,
             np.stack(rewards).astype(np.float32, copy=False),
             np.asarray(dones, dtype=np.float32),
             np.asarray(flags, dtype=np.uint8),
+            self.action_masks,
         )
 
     def close(self) -> None:
@@ -176,20 +192,35 @@ def train(args: argparse.Namespace) -> None:
     except RuntimeError:
         pass
 
-    model = EntityActorCritic().cpu()
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate, eps=1e-5)
     checkpoint_path = Path(args.checkpoint)
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
     metrics_path = Path(args.metrics)
     metrics_path.parent.mkdir(parents=True, exist_ok=True)
     first_update = 0
     environment_steps = 0
+    resume_checkpoint = None
     if args.resume and checkpoint_path.exists():
-        checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-        model.load_state_dict(checkpoint["model"])
-        optimizer.load_state_dict(checkpoint["optimizer"])
-        first_update = int(checkpoint["update"])
-        environment_steps = int(checkpoint["environment_steps"])
+        resume_checkpoint = torch.load(
+            checkpoint_path, map_location="cpu", weights_only=False
+        )
+        saved_geometry = bool(
+            resume_checkpoint.get("args", {}).get("analytic_geometry", False)
+        )
+        if saved_geometry != args.analytic_geometry:
+            raise ValueError(
+                "--analytic-geometry must match the checkpoint architecture"
+            )
+
+    model = EntityActorCritic(
+        analytic_geometry=args.analytic_geometry,
+        kinematic_spec=TH05_KINEMATICS if args.analytic_geometry else None,
+    ).cpu()
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate, eps=1e-5)
+    if resume_checkpoint is not None:
+        model.load_state_dict(resume_checkpoint["model"])
+        optimizer.load_state_dict(resume_checkpoint["optimizer"])
+        first_update = int(resume_checkpoint["update"])
+        environment_steps = int(resume_checkpoint["environment_steps"])
 
     pool = WorkerPool(
         args.image,
@@ -199,6 +230,7 @@ def train(args: argparse.Namespace) -> None:
         args.worker_timeout,
     )
     observation = pool.observations
+    action_mask = pool.action_masks
     hidden = torch.zeros(1, args.workers, model.hidden_size)
     objective_weights = np.asarray(args.objective_weights, dtype=np.float32)
     started = time.perf_counter()
@@ -220,23 +252,38 @@ def train(args: argparse.Namespace) -> None:
             hidden_states = np.empty(
                 (args.rollout_steps, args.workers, model.hidden_size), dtype=np.float32
             )
+            action_masks = np.empty(
+                (args.rollout_steps, args.workers, 19), dtype=np.bool_
+            )
+            removed_probability_mass = 0.0
             successes = failures = 0
 
             model.eval()
             for step in range(args.rollout_steps):
                 observations[step] = observation
                 hidden_states[step] = hidden[0].numpy()
+                action_masks[step] = action_mask
                 with torch.no_grad():
                     logits, value, next_hidden = model.forward_step(
                         torch.from_numpy(observation), hidden
                     )
-                    distribution = Categorical(logits=logits)
+                    distribution = MaskedCategorical(
+                        logits=logits,
+                        valid_mask=(
+                            torch.from_numpy(action_mask)
+                            if args.hard_safety
+                            else None
+                        ),
+                    )
                     action = distribution.sample()
                     log_probability = distribution.log_prob(action)
+                    removed_probability_mass += float(
+                        distribution.removed_probability_mass.sum().item()
+                    )
                 actions[step] = action.numpy()
                 log_probabilities[step] = log_probability.numpy()
                 values[step] = value.numpy()
-                observation, reward, done, flags = pool.step(actions[step])
+                observation, reward, done, flags, action_mask = pool.step(actions[step])
                 rewards[step] = reward
                 dones[step] = done
                 successes += int(np.count_nonzero(flags == 2))
@@ -274,6 +321,7 @@ def train(args: argparse.Namespace) -> None:
             return_sequences = _as_sequences(returns, sequence_length)
             old_value_sequences = _as_sequences(values, sequence_length)
             done_sequences = _as_sequences(dones, sequence_length)
+            action_mask_sequences = _as_sequences(action_masks, sequence_length)
             initial_hidden = np.swapaxes(hidden_states, 0, 1)[
                 :, ::sequence_length
             ].reshape(-1, model.hidden_size)
@@ -302,12 +350,18 @@ def train(args: argparse.Namespace) -> None:
                         old_value_sequences[indices]
                     ).reshape(-1, 3)
                     done_batch = torch.from_numpy(done_sequences[indices])
+                    action_mask_batch = torch.from_numpy(
+                        action_mask_sequences[indices]
+                    ).reshape(-1, 19)
                     hidden_batch = torch.from_numpy(initial_hidden[indices]).unsqueeze(0)
 
                     logits, new_values = model.forward_sequence(
                         features_batch, hidden_batch, done_batch
                     )
-                    distribution = Categorical(logits=logits)
+                    distribution = MaskedCategorical(
+                        logits=logits,
+                        valid_mask=action_mask_batch if args.hard_safety else None,
+                    )
                     new_log = distribution.log_prob(actions_batch)
                     log_ratio = new_log - old_log_batch
                     ratio = log_ratio.exp()
@@ -372,6 +426,20 @@ def train(args: argparse.Namespace) -> None:
                 "successes": successes,
                 "failures": failures,
                 "early_stop": stop_early,
+                "analytic_geometry": args.analytic_geometry,
+                "hard_safety": args.hard_safety,
+                "constrained_step_fraction": round(
+                    float(np.mean(np.any(~action_masks, axis=-1)))
+                    if args.hard_safety
+                    else 0.0,
+                    6,
+                ),
+                "removed_probability_mass": round(
+                    removed_probability_mass / (args.rollout_steps * args.workers)
+                    if args.hard_safety
+                    else 0.0,
+                    6,
+                ),
                 "wall_s": round(time.perf_counter() - started, 3),
             }
             print(json.dumps(metrics, sort_keys=True), flush=True)
@@ -417,6 +485,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--entropy-coefficient", type=float, default=0.02)
     parser.add_argument("--max-grad-norm", type=float, default=0.5)
     parser.add_argument("--target-kl", type=float, default=0.03)
+    parser.add_argument(
+        "--analytic-geometry",
+        action="store_true",
+        help="append constant-velocity collision geometry inside the set encoder",
+    )
+    parser.add_argument(
+        "--hard-safety",
+        action="store_true",
+        help="renormalize the policy over adapter-certified valid actions",
+    )
     parser.add_argument(
         "--objective-weights",
         type=float,

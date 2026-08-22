@@ -2,12 +2,21 @@ import unittest
 
 import torch
 
+from pc98rl.contracts import KinematicSpec
 from pc98rl.model import (
     ENTITY_COUNT,
     ENTITY_DIM,
     FEATURE_DIM,
     EntityActorCritic,
     EntitySetEncoder,
+    add_kinematic_features,
+)
+
+
+TEST_KINEMATICS = KinematicSpec(
+    position_scale=(384.0, 368.0),
+    velocity_scale=(12.0, 12.0),
+    horizon_steps=60.0,
 )
 
 
@@ -49,6 +58,31 @@ class EntityActorCriticTest(unittest.TestCase):
             output = encoder(tokens)
         self.assertTrue(torch.isfinite(output).all())
         self.assertTrue(torch.equal(output[0], output[1]))
+
+    def test_analytic_geometry_recovers_collision_course(self):
+        tokens = torch.zeros(1, 1, ENTITY_DIM)
+        tokens[..., 0] = 120.0 / TEST_KINEMATICS.position_scale[0]
+        tokens[..., 2] = -1.0
+        tokens[..., 6] = 120.0 / (384.0**2 + 368.0**2) ** 0.5
+        augmented = add_kinematic_features(
+            tokens, torch.zeros(1, 2), TEST_KINEMATICS
+        )
+        self.assertEqual(augmented.shape, (1, 1, ENTITY_DIM + 5))
+        self.assertAlmostEqual(float(augmented[0, 0, 7]), -0.5, places=6)
+        self.assertAlmostEqual(float(augmented[0, 0, 9]), 0.5, places=6)
+        self.assertAlmostEqual(float(augmented[0, 0, 10]), 1.0 / 6.0, places=6)
+        self.assertAlmostEqual(float(augmented[0, 0, 11]), 0.0, places=6)
+
+    def test_analytic_geometry_model_handles_padding(self):
+        model = EntityActorCritic(
+            analytic_geometry=True, kinematic_spec=TEST_KINEMATICS
+        )
+        features = torch.zeros(2, FEATURE_DIM)
+        for start in (37, 37 + ENTITY_COUNT * ENTITY_DIM):
+            features[:, start + ENTITY_DIM - 1 : start + ENTITY_COUNT * ENTITY_DIM : ENTITY_DIM] = 1
+        logits, values, _ = model.forward_step(features)
+        self.assertTrue(torch.isfinite(logits).all())
+        self.assertTrue(torch.isfinite(values).all())
 
     def test_model_is_compact(self):
         parameter_count = sum(parameter.numel() for parameter in self.model.parameters())

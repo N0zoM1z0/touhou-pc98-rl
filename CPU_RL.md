@@ -112,6 +112,7 @@ CUDA_VISIBLE_DEVICES='' nice -n 10 taskset -c 0-47 \
   --image external/th05-rl.hdi \
   --workers 8 --threads 8 \
   --rollout-steps 256 --updates 100 \
+  --analytic-geometry --hard-safety \
   --snapshot-every 2
 ```
 
@@ -120,6 +121,19 @@ Eight workers mean 2,048 game transitions per update. Each reset copies the
 racing on score and configuration writes. Run parallel top-level jobs under
 different X displays; one `xvfb-run --auto-servernum` wrapper is sufficient for
 the eight workers inside a single trainer.
+
+`--analytic-geometry` derives bounded relative velocity, closing speed,
+time-to-closest-approach, and miss-distance features inside the model. Physical
+normalization is supplied by the TH05 adapter rather than embedded in PPO.
+`--hard-safety` renormalizes the policy over adapter-certified actions. The
+current mask only removes a bomb with no bomb stock and boundary-directed moves
+that are equivalent under TH05's position clamp; it does not contain a scripted
+collision-avoidance policy. Both switches are experimental and should be
+ablated against the same transition budget.
+
+Reset waits until TH05's initial invincibility/input lock ends. The older
+readable-memory gate exposed roughly 80 uncontrollable transitions per reset
+and assigned their survival reward to actions that the game could not execute.
 
 Evaluate one checkpoint:
 

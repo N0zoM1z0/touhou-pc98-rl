@@ -13,7 +13,8 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from pc98rl.env import TH05CPUEnv
+from pc98rl.distributions import MaskedCategorical
+from pc98rl.env import TH05CPUEnv, TH05_KINEMATICS
 from pc98rl.heuristic import SafetyHeuristic
 
 
@@ -25,6 +26,8 @@ def evaluate(
     deterministic: bool = False,
     steps: int = 1_200,
     seed: int = 20260822,
+    analytic_geometry: bool = False,
+    hard_safety: bool | None = None,
 ) -> dict:
     """Run one fixed-seed episode prefix and return JSON-serializable metrics."""
     rng = np.random.default_rng(seed)
@@ -32,19 +35,33 @@ def evaluate(
     model = hidden = None
     if policy in ("untrained", "checkpoint"):
         import torch
-        from torch.distributions import Categorical
-
         from pc98rl.model import EntityActorCritic
 
         torch.set_num_threads(1)
-        torch.manual_seed(seed)
-        model = EntityActorCritic().eval()
+        try:
+            torch.set_num_interop_threads(1)
+        except RuntimeError:
+            pass
+        saved = None
         if policy == "checkpoint":
             if checkpoint is None:
                 raise ValueError("checkpoint policy requires a checkpoint path")
             saved = torch.load(checkpoint, map_location="cpu", weights_only=False)
+            analytic_geometry = bool(
+                saved.get("args", {}).get("analytic_geometry", False)
+            )
+            if hard_safety is None:
+                hard_safety = bool(saved.get("args", {}).get("hard_safety", False))
+        torch.manual_seed(seed)
+        model = EntityActorCritic(
+            analytic_geometry=analytic_geometry,
+            kinematic_spec=TH05_KINEMATICS if analytic_geometry else None,
+        ).eval()
+        if saved is not None:
             model.load_state_dict(saved["model"])
         hidden = torch.zeros(1, 1, model.hidden_size)
+    if hard_safety is None:
+        hard_safety = False
     env = TH05CPUEnv(image)
     reward_vector = np.zeros(3, dtype=np.float64)
     scalar_return = 0.0
@@ -54,25 +71,48 @@ def evaluate(
     completed_steps = 0
     terminal = False
     end_flag = 0
+    constrained_steps = 0
+    removed_probability_mass = 0.0
     observation = np.zeros(env.observation_space.shape, dtype=np.float32)
     try:
-        observation, _ = env.reset(seed=seed)
+        observation, info = env.reset(seed=seed)
+        action_mask = info["action_mask"]
         for _ in range(steps):
             if policy == "random":
-                action = int(rng.integers(19))
+                if hard_safety:
+                    valid_actions = np.flatnonzero(action_mask)
+                    action = int(rng.choice(valid_actions))
+                    removed_probability_mass += 1.0 - len(valid_actions) / 19.0
+                else:
+                    action = int(rng.integers(19))
             elif policy == "teacher":
                 action = teacher.act(observation)
+                if hard_safety and not action_mask[action]:
+                    action = int(np.flatnonzero(action_mask)[0])
             else:
                 with torch.no_grad():
                     logits, _, hidden = model.forward_step(
                         torch.from_numpy(observation).unsqueeze(0), hidden
                     )
+                    distribution = MaskedCategorical(
+                        logits=logits,
+                        valid_mask=(
+                            torch.from_numpy(action_mask).unsqueeze(0)
+                            if hard_safety
+                            else None
+                        ),
+                    )
+                    removed_probability_mass += float(
+                        distribution.removed_probability_mass.item()
+                    )
                     if deterministic:
-                        action = int(logits.argmax(dim=-1).item())
+                        action = int(distribution.mode.item())
                     else:
-                        action = int(Categorical(logits=logits).sample().item())
+                        action = int(distribution.sample().item())
+            constrained_steps += int(hard_safety and np.any(~action_mask))
             action_counts[action] += 1
             observation, reward, terminal, truncated, info = env.step(action)
+            action_mask = info["action_mask"]
             scalar_return += reward
             reward_vector += info["reward_vector"]
             deaths += int(info["reward_vector"][0] < -10.0)
@@ -94,6 +134,15 @@ def evaluate(
         "terminal": bool(terminal),
         "success": end_flag == 2,
         "end_flag": end_flag,
+        "analytic_geometry": analytic_geometry if model is not None else None,
+        "hard_safety": hard_safety,
+        "constrained_step_fraction": round(
+            constrained_steps / completed_steps if completed_steps else 0.0, 6
+        ),
+        "removed_probability_mass": round(
+            removed_probability_mass / completed_steps if completed_steps else 0.0,
+            6,
+        ),
         "final_xy": observation[:2].round(4).tolist(),
         "action_counts": action_counts.tolist(),
     }
@@ -107,6 +156,13 @@ def main() -> None:
     )
     parser.add_argument("--checkpoint", default="models/pc98_entity_ppo.pt")
     parser.add_argument("--deterministic", action="store_true")
+    parser.add_argument("--analytic-geometry", action="store_true")
+    parser.add_argument(
+        "--hard-safety",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="override the checkpoint's adapter-certified action mask setting",
+    )
     parser.add_argument("--steps", type=int, default=1_200)
     parser.add_argument("--seed", type=int, default=20260822)
     args = parser.parse_args()
@@ -117,6 +173,8 @@ def main() -> None:
         deterministic=args.deterministic,
         steps=args.steps,
         seed=args.seed,
+        analytic_geometry=args.analytic_geometry,
+        hard_safety=args.hard_safety,
     )
     print(json.dumps(result, sort_keys=True), flush=True)
 
