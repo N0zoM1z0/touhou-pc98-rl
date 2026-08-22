@@ -1,0 +1,249 @@
+{
+  "anchor": {
+    "behavior_action": 4,
+    "behavior_logits": [
+      -0.49594399333000183,
+      0.3038940131664276,
+      -0.8148069977760315,
+      -0.18581900000572205,
+      0.8918989896774292,
+      -0.5761719942092896,
+      0.5040609836578369,
+      -0.7063440084457397,
+      1.47645103931427,
+      0.2625960111618042,
+      -1.4131159782409668,
+      0.028977999463677406,
+      0.7307559847831726,
+      0.5801939964294434,
+      0.6185879707336426,
+      0.2781299948692322,
+      -0.6420480012893677,
+      -0.3060010075569153,
+      0.6851630210876465
+    ],
+    "h16_projected_survival_frames": [
+      1,
+      0,
+      16,
+      16,
+      16,
+      0,
+      16,
+      16,
+      16,
+      1,
+      0,
+      16,
+      4,
+      16,
+      0,
+      1,
+      16,
+      6
+    ],
+    "observation_sha256": "9dfe4244f9b8b28fb3e220144d030f695f550597dc0621c0e07e8d37e98c6210",
+    "outcomes": [
+      {
+        "action": 0,
+        "collision_decision": 1,
+        "collision_kind": "pending_hit",
+        "collision_native_frames": 2,
+        "end_flag": 0,
+        "final_stage_frame": 441,
+        "frames_evaluated": 2,
+        "terminal": false
+      },
+      {
+        "action": 1,
+        "collision_decision": 1,
+        "collision_kind": "pending_hit",
+        "collision_native_frames": 2,
+        "end_flag": 0,
+        "final_stage_frame": 441,
+        "frames_evaluated": 2,
+        "terminal": false
+      },
+      {
+        "action": 2,
+        "collision_decision": null,
+        "collision_kind": "structurally_illegal",
+        "collision_native_frames": null,
+        "end_flag": 0,
+        "final_stage_frame": 439,
+        "frames_evaluated": 0,
+        "terminal": false
+      },
+      {
+        "action": 3,
+        "collision_decision": null,
+        "collision_kind": null,
+        "collision_native_frames": null,
+        "end_flag": 0,
+        "final_stage_frame": 465,
+        "frames_evaluated": 26,
+        "terminal": false
+      },
+      {
+        "action": 4,
+        "collision_decision": 2,
+        "collision_kind": "pending_hit",
+        "collision_native_frames": 4,
+        "end_flag": 0,
+        "final_stage_frame": 443,
+        "frames_evaluated": 4,
+        "terminal": false
+      },
+      {
+        "action": 5,
+        "collision_decision": 1,
+        "collision_kind": "pending_hit",
+        "collision_native_frames": 2,
+        "end_flag": 0,
+        "final_stage_frame": 441,
+        "frames_evaluated": 2,
+        "terminal": false
+      },
+      {
+        "action": 6,
+        "collision_decision": 2,
+        "collision_kind": "pending_hit",
+        "collision_native_frames": 4,
+        "end_flag": 0,
+        "final_stage_frame": 443,
+        "frames_evaluated": 4,
+        "terminal": false
+      },
+      {
+        "action": 7,
+        "collision_decision": null,
+        "collision_kind": "structurally_illegal",
+        "collision_native_frames": null,
+        "end_flag": 0,
+        "final_stage_frame": 439,
+        "frames_evaluated": 0,
+        "terminal": false
+      },
+      {
+        "action": 8,
+        "collision_decision": null,
+        "collision_kind": "structurally_illegal",
+        "collision_native_frames": null,
+        "end_flag": 0,
+        "final_stage_frame": 439,
+        "frames_evaluated": 0,
+        "terminal": false
+      },
+      {
+        "action": 9,
+        "collision_decision": 1,
+        "collision_kind": "pending_hit",
+        "collision_native_frames": 2,
+        "end_flag": 0,
+        "final_stage_frame": 441,
+        "frames_evaluated": 2,
+        "terminal": false
+      },
+      {
+        "action": 10,
+        "collision_decision": 1,
+        "collision_kind": "pending_hit",
+        "collision_native_frames": 2,
+        "end_flag": 0,
+        "final_stage_frame": 441,
+        "frames_evaluated": 2,
+        "terminal": false
+      },
+      {
+        "action": 11,
+        "collision_decision": null,
+        "collision_kind": "structurally_illegal",
+        "collision_native_frames": null,
+        "end_flag": 0,
+        "final_stage_frame": 439,
+        "frames_evaluated": 0,
+        "terminal": false
+      },
+      {
+        "action": 12,
+        "collision_decision": null,
+        "collision_kind": null,
+        "collision_native_frames": null,
+        "end_flag": 0,
+        "final_stage_frame": 465,
+        "frames_evaluated": 26,
+        "terminal": false
+      },
+      {
+        "action": 13,
+        "collision_decision": 2,
+        "collision_kind": "pending_hit",
+        "collision_native_frames": 4,
+        "end_flag": 0,
+        "final_stage_frame": 443,
+        "frames_evaluated": 4,
+        "terminal": false
+      },
+      {
+        "action": 14,
+        "collision_decision": 1,
+        "collision_kind": "pending_hit",
+        "collision_native_frames": 2,
+        "end_flag": 0,
+        "final_stage_frame": 441,
+        "frames_evaluated": 2,
+        "terminal": false
+      },
+      {
+        "action": 15,
+        "collision_decision": 1,
+        "collision_kind": "pending_hit",
+        "collision_native_frames": 2,
+        "end_flag": 0,
+        "final_stage_frame": 441,
+        "frames_evaluated": 2,
+        "terminal": false
+      },
+      {
+        "action": 16,
+        "collision_decision": null,
+        "collision_kind": "structurally_illegal",
+        "collision_native_frames": null,
+        "end_flag": 0,
+        "final_stage_frame": 439,
+        "frames_evaluated": 0,
+        "terminal": false
+      },
+      {
+        "action": 17,
+        "collision_decision": null,
+        "collision_kind": "structurally_illegal",
+        "collision_native_frames": null,
+        "end_flag": 0,
+        "final_stage_frame": 439,
+        "frames_evaluated": 0,
+        "terminal": false
+      }
+    ],
+    "search_decision": 188,
+    "stage_frame": 439,
+    "unsafe_actions_at_trigger_horizon": 7
+  },
+  "checkpoint": "models/deploy/th05-s1-lunatic-stage1-online.pt",
+  "checkpoint_sha256": "773c40d971d0b112cf808885f777cf616c25ef0a6a9b3a7dc9caddd6631c68bb",
+  "continuation": "deterministic actor with H2 regular-bullet shield and no bombs",
+  "continuation_decisions": 12,
+  "cpu_only": true,
+  "decision": "The anchor yields action-dependent collision labels; proceed to a multi-anchor dataset and distilled actor experiment.",
+  "image": "external/th05-lunatic-s1-p0-p1.hdi",
+  "native_frames_per_decision": 2,
+  "online_modules_added": 0,
+  "research_question": "Do exact branches from one audited high-risk TH05 state expose action-dependent collision outcomes for offline supervision?",
+  "safety_horizon": 2,
+  "summary": {
+    "collision_actions": 10,
+    "earliest_collision_native_frames": 2,
+    "horizon_safe_actions": 2,
+    "legal_actions": 12
+  }
+}
