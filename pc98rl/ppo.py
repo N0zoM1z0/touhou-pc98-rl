@@ -280,6 +280,19 @@ def _balanced_masked_bce(
     return torch.stack(horizon_losses).mean()
 
 
+def _new_future_miss_head(
+    hidden_size: int,
+    action_dim: int,
+    horizon_count: int,
+) -> FutureMissHead:
+    """Initialize an auxiliary head without shifting policy-sampling RNG."""
+    rng_state = torch.random.get_rng_state()
+    try:
+        return FutureMissHead(hidden_size, action_dim, horizon_count).cpu()
+    finally:
+        torch.random.set_rng_state(rng_state)
+
+
 def _apply_checkpoint(
     model: nn.Module,
     optimizer: torch.optim.Optimizer,
@@ -383,11 +396,11 @@ def train(args: argparse.Namespace) -> None:
         kinematic_spec=TH05_KINEMATICS if args.analytic_geometry else None,
     ).cpu()
     risk_head = (
-        FutureMissHead(
+        _new_future_miss_head(
             model.hidden_size,
             action_dim=19,
             horizon_count=len(risk_horizons),
-        ).cpu()
+        )
         if risk_enabled
         else None
     )

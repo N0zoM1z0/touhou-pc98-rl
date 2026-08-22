@@ -8,6 +8,7 @@ from pc98rl.ppo import (
     _as_sequences,
     _balanced_masked_bce,
     _future_miss_targets,
+    _new_future_miss_head,
     _vector_gae,
 )
 
@@ -82,6 +83,12 @@ class CpuPPOHelpersTest(unittest.TestCase):
         self.assertAlmostEqual(float(loss.item()), float(np.log(2.0)), places=6)
         loss.backward()
         self.assertTrue(torch.isfinite(logits.grad).all())
+
+    def test_auxiliary_head_initialization_preserves_policy_rng(self):
+        torch.manual_seed(123)
+        before = torch.random.get_rng_state().clone()
+        _new_future_miss_head(hidden_size=128, action_dim=19, horizon_count=2)
+        torch.testing.assert_close(torch.random.get_rng_state(), before)
 
 
 if __name__ == "__main__":
