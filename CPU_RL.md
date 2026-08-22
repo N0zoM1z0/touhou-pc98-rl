@@ -176,7 +176,7 @@ CUDA_VISIBLE_DEVICES='' nice -n 10 taskset -c 0-7 \
   xvfb-run --auto-servernum uv run python scripts/compare_policies.py \
   --image external/th05-rl.hdi \
   --checkpoint models/pc98_entity_ppo_best.pt \
-  --baseline untrained --seeds 51 52 53 54 --steps 900
+  --baseline untrained --seeds 51 52 53 54 --steps 900 --jobs 4
 ```
 
 Do not trust the last PPO update. Select snapshots on several fixed seeds.

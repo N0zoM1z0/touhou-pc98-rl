@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import json
 import math
 import sys
@@ -14,6 +15,37 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts.evaluate_policy import evaluate
+
+
+def _comparison_task(task: tuple) -> tuple[dict, dict]:
+    (
+        image,
+        checkpoint,
+        baseline_policy,
+        deterministic,
+        steps,
+        seed,
+        baseline_geometry,
+        baseline_safety,
+    ) = task
+    baseline = evaluate(
+        image=image,
+        policy=baseline_policy,
+        deterministic=deterministic,
+        steps=steps,
+        seed=seed,
+        analytic_geometry=baseline_geometry,
+        hard_safety=baseline_safety,
+    )
+    checkpoint_result = evaluate(
+        image=image,
+        policy="checkpoint",
+        checkpoint=checkpoint,
+        deterministic=deterministic,
+        steps=steps,
+        seed=seed,
+    )
+    return baseline, checkpoint_result
 
 
 def summarize(evaluations: list[dict]) -> dict:
@@ -30,6 +62,9 @@ def summarize(evaluations: list[dict]) -> dict:
         ),
         "deaths": int(sum(evaluation["death_events"] for evaluation in evaluations)),
         "successes": int(sum(evaluation["success"] for evaluation in evaluations)),
+        "no_miss_successes": int(
+            sum(evaluation.get("no_miss_success", False) for evaluation in evaluations)
+        ),
         "mean_raw_reward": np.mean(
             [evaluation["raw_reward"] for evaluation in evaluations], axis=0
         ).round(6).tolist(),
@@ -45,47 +80,55 @@ def main() -> None:
     )
     parser.add_argument("--seeds", type=int, nargs="+", required=True)
     parser.add_argument("--steps", type=int, default=1_200)
+    parser.add_argument("--jobs", type=int, default=1)
     parser.add_argument("--deterministic", action="store_true")
     parser.add_argument("--report", default="runs/pc98rl/policy_comparison.json")
     args = parser.parse_args()
 
     if len(set(args.seeds)) != len(args.seeds):
         parser.error("seeds must be unique")
+    if args.jobs < 1:
+        parser.error("jobs must be at least 1")
 
     baseline_geometry = False
-    baseline_safety = False
-    if args.baseline == "untrained":
-        import torch
+    import torch
 
-        saved = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
+    saved = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
+    baseline_safety = bool(saved.get("args", {}).get("hard_safety", False))
+    if args.baseline == "untrained":
         baseline_geometry = bool(
             saved.get("args", {}).get("analytic_geometry", False)
         )
-        baseline_safety = bool(saved.get("args", {}).get("hard_safety", False))
 
     baseline_results = []
     checkpoint_results = []
-    for seed in args.seeds:
-        baseline = evaluate(
-            image=args.image,
-            policy=args.baseline,
-            deterministic=args.deterministic,
-            steps=args.steps,
-            seed=seed,
-            analytic_geometry=baseline_geometry,
-            hard_safety=baseline_safety,
+    tasks = [
+        (
+            args.image,
+            args.checkpoint,
+            args.baseline,
+            args.deterministic,
+            args.steps,
+            seed,
+            baseline_geometry,
+            baseline_safety,
         )
-        checkpoint = evaluate(
-            image=args.image,
-            policy="checkpoint",
-            checkpoint=args.checkpoint,
-            deterministic=args.deterministic,
-            steps=args.steps,
-            seed=seed,
-        )
-        baseline_results.append(baseline)
-        checkpoint_results.append(checkpoint)
-        print(json.dumps({"baseline": baseline, "checkpoint": checkpoint}, sort_keys=True))
+        for seed in args.seeds
+    ]
+    if args.jobs == 1:
+        results = map(_comparison_task, tasks)
+        executor = None
+    else:
+        executor = concurrent.futures.ProcessPoolExecutor(max_workers=args.jobs)
+        results = executor.map(_comparison_task, tasks)
+    try:
+        for baseline, checkpoint in results:
+            baseline_results.append(baseline)
+            checkpoint_results.append(checkpoint)
+            print(json.dumps({"baseline": baseline, "checkpoint": checkpoint}, sort_keys=True))
+    finally:
+        if executor is not None:
+            executor.shutdown(cancel_futures=True)
 
     baseline_summary = summarize(baseline_results)
     checkpoint_summary = summarize(checkpoint_results)
@@ -101,6 +144,7 @@ def main() -> None:
     report = {
         "seeds": args.seeds,
         "steps": args.steps,
+        "jobs": args.jobs,
         "deterministic": args.deterministic,
         "baseline_policy": args.baseline,
         "checkpoint": str(Path(args.checkpoint).resolve()),
