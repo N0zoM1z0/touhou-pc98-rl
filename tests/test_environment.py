@@ -5,6 +5,7 @@ from pathlib import Path
 
 import numpy as np
 
+from pc98rl import _native
 from pc98rl.env import describe_th05_scenario, resolve_dosbox_executable
 
 
@@ -43,6 +44,15 @@ class EmulatorResolutionTest(unittest.TestCase):
             executable.touch(mode=0o644)
             with self.assertRaisesRegex(FileNotFoundError, "not runnable"):
                 resolve_dosbox_executable(executable)
+
+    def test_early_emulator_exit_is_not_reported_as_memory_permission(self):
+        with tempfile.NamedTemporaryFile() as image:
+            with self.assertRaisesRegex(RuntimeError, "exited before memory attach"):
+                _native.MemoryWatcher(
+                    spawn_dosbox=True,
+                    image_path=image.name,
+                    dosbox_executable="/bin/false",
+                )
 
 
 if __name__ == "__main__":

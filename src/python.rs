@@ -357,6 +357,26 @@ impl MemoryWatcher {
 }
 
 impl MemoryWatcher {
+    fn env_is_nonempty(name: &str) -> bool {
+        std::env::var_os(name).is_some_and(|value| !value.is_empty())
+    }
+
+    fn should_force_dummy_sdl_for(
+        has_video_driver: bool,
+        has_x11_display: bool,
+        has_wayland_display: bool,
+    ) -> bool {
+        !has_video_driver && !has_x11_display && !has_wayland_display
+    }
+
+    fn should_force_dummy_sdl() -> bool {
+        Self::should_force_dummy_sdl_for(
+            Self::env_is_nonempty("SDL_VIDEODRIVER"),
+            Self::env_is_nonempty("DISPLAY"),
+            Self::env_is_nonempty("WAYLAND_DISPLAY"),
+        )
+    }
+
     fn cfg_keydev(inner: &mut TH05MemoryWatcher) -> PyResult<()> {
         let Some(device) = inner.keyboard_device.as_mut() else {
             return Ok(());
@@ -415,6 +435,12 @@ impl MemoryWatcher {
 
         let executable = dosbox_executable.unwrap_or("dosbox-x");
         let mut command = Command::new(executable);
+        // CPU training commonly runs from a non-interactive shell.  SDL exits
+        // immediately when neither X11 nor Wayland is available, but its dummy
+        // video backend is sufficient because observations come from guest RAM.
+        if Self::should_force_dummy_sdl() {
+            command.env("SDL_VIDEODRIVER", "dummy");
+        }
         if let Some(image_path) = image_path {
             let image_path = std::fs::canonicalize(image_path).map_err(|e| {
                 pyo3::exceptions::PyValueError::new_err(format!(
@@ -446,7 +472,7 @@ impl MemoryWatcher {
                 .current_dir(&export_dir);
         }
 
-        let child = command
+        let mut child = command
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .spawn()
@@ -467,6 +493,18 @@ impl MemoryWatcher {
         let max_retries = 30;
         let mut last_err = String::new();
         for attempt in 1..=max_retries {
+            if let Some(status) = child.try_wait().map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!(
+                    "Failed to query DOSBox-X child '{}': {}",
+                    executable, e
+                ))
+            })? {
+                return Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
+                    "DOSBox-X (PID {}) exited before memory attach with {}. \
+                     Check the emulator configuration and SDL video environment.",
+                    pid, status
+                )));
+            }
             match TH05MemoryWatcher::new(pid) {
                 Ok(mut inner) => match inner.initialize() {
                     Ok(()) => {
@@ -498,7 +536,6 @@ impl MemoryWatcher {
         }
 
         // Failed after all retries.
-        let mut child = child;
         let _ = child.kill();
         let _ = child.wait();
         Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
@@ -568,4 +605,25 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(init_logging, m)?)?;
     m.add_function(wrap_pyfunction!(rec_maps_bytes, m)?)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::MemoryWatcher;
+
+    #[test]
+    fn dummy_video_is_only_for_displayless_launches() {
+        assert!(MemoryWatcher::should_force_dummy_sdl_for(
+            false, false, false
+        ));
+        assert!(!MemoryWatcher::should_force_dummy_sdl_for(
+            true, false, false
+        ));
+        assert!(!MemoryWatcher::should_force_dummy_sdl_for(
+            false, true, false
+        ));
+        assert!(!MemoryWatcher::should_force_dummy_sdl_for(
+            false, false, true
+        ));
+    }
 }
