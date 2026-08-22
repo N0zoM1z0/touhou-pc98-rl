@@ -22,6 +22,7 @@ def _comparison_task(task: tuple) -> tuple[dict, dict]:
         image,
         checkpoint,
         baseline_policy,
+        baseline_checkpoint,
         deterministic,
         steps,
         seed,
@@ -31,6 +32,7 @@ def _comparison_task(task: tuple) -> tuple[dict, dict]:
     baseline = evaluate(
         image=image,
         policy=baseline_policy,
+        checkpoint=baseline_checkpoint,
         deterministic=deterministic,
         steps=steps,
         seed=seed,
@@ -75,8 +77,13 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--image", required=True)
     parser.add_argument("--checkpoint", required=True)
-    parser.add_argument(
+    baseline = parser.add_mutually_exclusive_group()
+    baseline.add_argument(
         "--baseline", choices=("random", "teacher", "untrained"), default="untrained"
+    )
+    baseline.add_argument(
+        "--baseline-checkpoint",
+        help="compare against another frozen checkpoint on the same seeds",
     )
     parser.add_argument("--seeds", type=int, nargs="+", required=True)
     parser.add_argument("--steps", type=int, default=1_200)
@@ -90,12 +97,16 @@ def main() -> None:
     if args.jobs < 1:
         parser.error("jobs must be at least 1")
 
+    baseline_policy = "checkpoint" if args.baseline_checkpoint else args.baseline
     baseline_geometry = False
     import torch
 
     saved = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
-    baseline_safety = bool(saved.get("args", {}).get("hard_safety", False))
-    if args.baseline == "untrained":
+    target_safety = bool(saved.get("args", {}).get("hard_safety", False))
+    # Frozen checkpoints retain their own adapter setting.  Non-checkpoint
+    # baselines use the target's shield so the action-space constraint is matched.
+    baseline_safety = None if baseline_policy == "checkpoint" else target_safety
+    if baseline_policy == "untrained":
         baseline_geometry = bool(
             saved.get("args", {}).get("analytic_geometry", False)
         )
@@ -106,7 +117,8 @@ def main() -> None:
         (
             args.image,
             args.checkpoint,
-            args.baseline,
+            baseline_policy,
+            args.baseline_checkpoint,
             args.deterministic,
             args.steps,
             seed,
@@ -146,7 +158,12 @@ def main() -> None:
         "steps": args.steps,
         "jobs": args.jobs,
         "deterministic": args.deterministic,
-        "baseline_policy": args.baseline,
+        "baseline_policy": baseline_policy,
+        "baseline_checkpoint": (
+            str(Path(args.baseline_checkpoint).resolve())
+            if args.baseline_checkpoint
+            else None
+        ),
         "checkpoint": str(Path(args.checkpoint).resolve()),
         "baseline_summary": baseline_summary,
         "checkpoint_summary": checkpoint_summary,
