@@ -1,0 +1,88 @@
+{
+  "anchor": {
+    "observation_sha256": "b2d775b1e724adeed618f8d4bbed3337f2dc2a80eee2d1bcdae7aba388613987",
+    "raw_frame_sha256": "2281e6a41d4107a9a64b550c625061a4a13315010e35f2304b6af7c190cdf88e",
+    "stage_frame": 63
+  },
+  "anchor_exact": true,
+  "contrast": {
+    "action": 11,
+    "decisions": 8,
+    "end_flag": 0,
+    "miss_events": 0,
+    "observation_sha256": "017da7b0d962b9da8f7ace9e39cbfae8dae99dcadb6cc6480987ec21db52bdff",
+    "raw_frame_sha256": "d1a9e4bc589e175e9b6187e3eed319102006ba1d125029f5f1f2f50cd1842863",
+    "stage_frames": [
+      65,
+      67,
+      69,
+      71,
+      73,
+      75,
+      77,
+      79
+    ]
+  },
+  "contrasting_action_changes_state": true,
+  "cpu_only": true,
+  "decision": "proceed to high-risk action-contrastive labeling; this probe establishes deterministic branching but does not yet establish a survival improvement",
+  "first": {
+    "action": 10,
+    "decisions": 8,
+    "end_flag": 0,
+    "miss_events": 0,
+    "observation_sha256": "914e1008dece42e339e7aed5677b9aa8c8ee9368500941f9daa0792f12774f31",
+    "raw_frame_sha256": "8bece1c64e03b1cacd8bc956b988ea79ba12cd82f72aa7ebbd611dfdf10424f2",
+    "stage_frames": [
+      65,
+      67,
+      69,
+      71,
+      73,
+      75,
+      77,
+      79
+    ]
+  },
+  "first_contrast_observation_max_abs_difference": 0.375,
+  "first_repeat_observation_max_abs_error": 0.0,
+  "image": "external/th05-lunatic-s1-p0-p1.hdi",
+  "limitations": [
+    "The probe starts at an early safe pre-boss state.",
+    "Collision-time labels and actor distillation are not evaluated yet.",
+    "The X11/Xvfb controller is offline-only."
+  ],
+  "method": {
+    "backend": "private DOSBox-X save file controlled by exact PID/X11 window",
+    "decisions_per_branch": 8,
+    "native_frames_per_decision": 2,
+    "stage_frame_player_relative_offset": -28352,
+    "stage_frame_source": "MAIN.EXE _stage_frame"
+  },
+  "online_modules_added": 0,
+  "repeat": {
+    "action": 10,
+    "decisions": 8,
+    "end_flag": 0,
+    "miss_events": 0,
+    "observation_sha256": "914e1008dece42e339e7aed5677b9aa8c8ee9368500941f9daa0792f12774f31",
+    "raw_frame_sha256": "8bece1c64e03b1cacd8bc956b988ea79ba12cd82f72aa7ebbd611dfdf10424f2",
+    "stage_frames": [
+      65,
+      67,
+      69,
+      71,
+      73,
+      75,
+      77,
+      79
+    ]
+  },
+  "research_question": "Can the offline collector replay action alternatives from an identical TH05 emulator state without changing the online actor?",
+  "restored": {
+    "observation_sha256": "b2d775b1e724adeed618f8d4bbed3337f2dc2a80eee2d1bcdae7aba388613987",
+    "raw_frame_sha256": "2281e6a41d4107a9a64b550c625061a4a13315010e35f2304b6af7c190cdf88e",
+    "stage_frame": 63
+  },
+  "same_action_replay_exact": true
+}

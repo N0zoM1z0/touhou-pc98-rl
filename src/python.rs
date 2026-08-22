@@ -309,6 +309,7 @@ pub struct MemoryWatcher {
     pid: i32,
     inner: TH05MemoryWatcher,
     child: Option<std::process::Child>,
+    stage_frame_addr: Option<usize>,
 }
 
 impl Drop for MemoryWatcher {
@@ -326,12 +327,13 @@ impl MemoryWatcher {
     /// child and attached to main directly. So I would not require perfect timing
     /// to launch the agent.
     #[new]
-    #[pyo3(signature = (spawn_dosbox=false, pid=None, image_path=None, dosbox_executable=None))]
+    #[pyo3(signature = (spawn_dosbox=false, pid=None, image_path=None, dosbox_executable=None, state_file=None))]
     pub fn new(
         spawn_dosbox: bool,
         pid: Option<i32>,
         image_path: Option<String>,
         dosbox_executable: Option<String>,
+        state_file: Option<String>,
     ) -> PyResult<Self> {
         if spawn_dosbox {
             if pid.is_some() {
@@ -339,7 +341,11 @@ impl MemoryWatcher {
                     "pid cannot be combined with spawn_dosbox=True",
                 ));
             }
-            Self::new_spawn(image_path.as_deref(), dosbox_executable.as_deref())
+            Self::new_spawn(
+                image_path.as_deref(),
+                dosbox_executable.as_deref(),
+                state_file.as_deref(),
+            )
         } else {
             if image_path.is_some() {
                 return Err(pyo3::exceptions::PyValueError::new_err(
@@ -349,6 +355,11 @@ impl MemoryWatcher {
             if dosbox_executable.is_some() {
                 return Err(pyo3::exceptions::PyValueError::new_err(
                     "dosbox_executable requires spawn_dosbox=True",
+                ));
+            }
+            if state_file.is_some() {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "state_file requires spawn_dosbox=True",
                 ));
             }
             Self::new_attach(pid)
@@ -396,10 +407,11 @@ impl MemoryWatcher {
     pub fn read_state(&mut self) -> PyResult<Option<(Vec<f32>, Vec<f32>, u8, Vec<f32>, RawFrame)>> {
         let prev_state = self.inner.last_state.clone();
 
-        let state = match self.inner.try_read_state() {
+        let mut state = match self.inner.try_read_state() {
             Some(s) => s,
             None => return Ok(None),
         };
+        self.stamp_stage_frame(&mut state)?;
 
         let (features, maps) = self.inner.observation_comp(&state);
         let game_end_flag = state.resident.game_end_flag;
@@ -430,10 +442,11 @@ impl MemoryWatcher {
     pub fn read_features(&mut self) -> PyResult<Option<(Vec<f32>, u8, Vec<f32>, RawFrame)>> {
         let prev_state = self.inner.last_state.clone();
 
-        let state = match self.inner.try_read_state() {
+        let mut state = match self.inner.try_read_state() {
             Some(s) => s,
             None => return Ok(None),
         };
+        self.stamp_stage_frame(&mut state)?;
 
         let features = self.inner.observation_features(&state);
         let game_end_flag = state.resident.game_end_flag;
@@ -539,9 +552,117 @@ impl MemoryWatcher {
     pub fn pid(&self) -> i32 {
         self.pid
     }
+
+    /// Locate TH05's live `_stage_frame` while the game is running.  Its four
+    /// adjacent modulo bytes make it identifiable without a fixed host address.
+    #[pyo3(signature = (sample_interval_ms=40))]
+    pub fn discover_stage_frame(&mut self, sample_interval_ms: u64) -> PyResult<u32> {
+        if sample_interval_ms < 20 || sample_interval_ms > 200 {
+            return Err(PyValueError::new_err(
+                "sample_interval_ms must be between 20 and 200",
+            ));
+        }
+        let initial = self.scan_stage_frame_candidates()?;
+        std::thread::sleep(std::time::Duration::from_millis(sample_interval_ms));
+        let later = self.scan_stage_frame_candidates()?;
+        let advancing = initial
+            .iter()
+            .filter_map(|(address, before)| {
+                let (_, after) = later.iter().find(|(candidate, _)| candidate == address)?;
+                let delta = after.wrapping_sub(*before);
+                (delta > 0 && delta <= 16).then_some((*address, *after))
+            })
+            .collect::<Vec<_>>();
+        if advancing.len() != 1 {
+            return Err(PyRuntimeError::new_err(format!(
+                "expected one advancing TH05 stage-frame counter, found {}: {:?}",
+                advancing.len(), advancing
+            )));
+        }
+        self.stage_frame_addr = Some(advancing[0].0);
+        Ok(u32::from(advancing[0].1))
+    }
+
+    /// Read the discovered native stage-frame counter without changing reward
+    /// history. Offline branch rollouts use this instead of wall-clock sleeps.
+    pub fn stage_frame(&mut self) -> PyResult<u32> {
+        let address = self.stage_frame_addr.ok_or_else(|| {
+            PyRuntimeError::new_err("call discover_stage_frame() while TH05 is running")
+        })?;
+        self.inner
+            .finder
+            .memory()
+            .read_u16_le(address)
+            .map(u32::from)
+            .map_err(|error| PyRuntimeError::new_err(error.to_string()))
+    }
+
+    pub fn stage_frame_offset(&self) -> PyResult<i64> {
+        let player_pos = self
+            .inner
+            .finder
+            .addresses()
+            .player_pos
+            .ok_or_else(|| PyRuntimeError::new_err("TH05 player address is unavailable"))?;
+        let address = self.stage_frame_addr.ok_or_else(|| {
+            PyRuntimeError::new_err("TH05 stage-frame address is unavailable")
+        })?;
+        Ok(address as i64 - player_pos as i64)
+    }
 }
 
 impl MemoryWatcher {
+    fn scan_stage_frame_candidates(&mut self) -> PyResult<Vec<(usize, u16)>> {
+        let player_pos = self
+            .inner
+            .finder
+            .addresses()
+            .player_pos
+            .ok_or_else(|| PyRuntimeError::new_err("TH05 player address is unavailable"))?;
+        let search_bytes = 0x1_0000usize;
+        let search_start = player_pos.checked_sub(search_bytes).ok_or_else(|| {
+            PyRuntimeError::new_err("TH05 player address cannot contain the data segment")
+        })?;
+        let data = self
+            .inner
+            .finder
+            .memory()
+            .read(search_start, search_bytes)
+            .map_err(|error| PyRuntimeError::new_err(error.to_string()))?;
+        let mut candidates = Vec::new();
+        for offset in 0..data.len().saturating_sub(6) {
+            let address = search_start + offset;
+            if address % 2 != 0 {
+                continue;
+            }
+            let value = u16::from_le_bytes([data[offset], data[offset + 1]]);
+            if value >= 0x1000 {
+                continue;
+            }
+            if data[offset + 2] == (value & 1) as u8
+                && data[offset + 3] == (value & 3) as u8
+                && data[offset + 4] == (value & 7) as u8
+                && data[offset + 5] == (value & 15) as u8
+            {
+                candidates.push((address, value));
+            }
+        }
+        Ok(candidates)
+    }
+
+    fn stamp_stage_frame(&mut self, state: &mut GameState) -> PyResult<()> {
+        if let Some(address) = self.stage_frame_addr {
+            state.resident.frames = u32::from(
+                self.inner
+                    .finder
+                    .memory()
+                    .read_u16_le(address)
+                    .map_err(|error| PyRuntimeError::new_err(error.to_string()))?,
+            );
+        }
+        Ok(())
+    }
+
     fn env_is_nonempty(name: &str) -> bool {
         std::env::var_os(name).is_some_and(|value| !value.is_empty())
     }
@@ -604,12 +725,20 @@ impl MemoryWatcher {
 
         Ok(Self {
             pid,
+            stage_frame_addr: inner.finder.addresses().player_pos.map(|player_pos| {
+                (player_pos as isize + crate::games::th05_c::offsets::TH05Offsets::P2STAGE_FRAME)
+                    as usize
+            }),
             inner,
             child: None,
         })
     }
 
-    fn new_spawn(image_path: Option<&str>, dosbox_executable: Option<&str>) -> PyResult<Self> {
+    fn new_spawn(
+        image_path: Option<&str>,
+        dosbox_executable: Option<&str>,
+        state_file: Option<&str>,
+    ) -> PyResult<Self> {
         use std::process::Command;
 
         let project_dir = std::env::current_dir()
@@ -657,6 +786,30 @@ impl MemoryWatcher {
                 .current_dir(&export_dir);
         }
 
+        if let Some(state_file) = state_file {
+            let requested = std::path::PathBuf::from(state_file);
+            let state_file = if requested.is_absolute() {
+                requested
+            } else {
+                project_dir.join(requested)
+            };
+            let parent = state_file.parent().ok_or_else(|| {
+                PyValueError::new_err("state_file must have a parent directory")
+            })?;
+            std::fs::create_dir_all(parent).map_err(|error| {
+                PyValueError::new_err(format!(
+                    "Failed to create state_file directory '{}': {}",
+                    parent.display(),
+                    error
+                ))
+            })?;
+            command
+                .args(["-set", "dosbox saveremark=false"])
+                .args(["-set", "dosbox forceloadstate=true"])
+                .arg("-set")
+                .arg(format!("dosbox savefile={}", state_file.display()));
+        }
+
         let mut child = command
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
@@ -701,10 +854,16 @@ impl MemoryWatcher {
                             attempt
                         );
 
+                        let stage_frame_addr = inner.finder.addresses().player_pos.map(|player_pos| {
+                            (player_pos as isize
+                                + crate::games::th05_c::offsets::TH05Offsets::P2STAGE_FRAME)
+                                as usize
+                        });
                         return Ok(Self {
                             pid,
                             inner,
                             child: Some(child),
+                            stage_frame_addr,
                         });
                     }
                     Err(e) => {

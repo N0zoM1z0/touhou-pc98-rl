@@ -28,6 +28,8 @@ impl TH05Offsets {
     pub const P2ENEMIES: isize = -0x322A;
     pub const P2ITEMS: isize = -0x15A0;
     pub const P2STAGE_GRAZE: isize = -0x526;
+    /// MAIN.EXE `_stage_frame`, followed by its mod2/mod4/mod8/mod16 bytes.
+    pub const P2STAGE_FRAME: isize = -0x6EC0;
     pub const P2INVINCIBLE: usize = 0x1C;
     pub const P2CONTROL_LOCK: usize = 0x1D;
     pub const P2PLAYER_IS_HIT: usize = 0x21;

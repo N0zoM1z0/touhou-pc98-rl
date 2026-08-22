@@ -157,6 +157,7 @@ class TH05CPUEnv(gym.Env):
         spawn_retries: int = 3,
         dosbox_executable: str | Path | None = None,
         deathbomb_guard: bool = False,
+        enable_state_branching: bool = False,
     ) -> None:
         super().__init__()
         self.image_template = Path(image_template).expanduser().resolve()
@@ -174,6 +175,7 @@ class TH05CPUEnv(gym.Env):
         self.warmup_timeout_s = float(warmup_timeout_s)
         self.dosbox_executable = resolve_dosbox_executable(dosbox_executable)
         self.deathbomb_guard = bool(deathbomb_guard)
+        self.enable_state_branching = bool(enable_state_branching)
         self.spawn_retries = int(spawn_retries)
         if self.spawn_retries < 1:
             raise ValueError("spawn_retries must be positive")
@@ -184,11 +186,14 @@ class TH05CPUEnv(gym.Env):
 
         self._tempdir = tempfile.TemporaryDirectory(prefix="th05-cpu-")
         self._working_image = Path(self._tempdir.name) / "game.hdi"
+        self._state_file = Path(self._tempdir.name) / "branch.sav"
         self._watcher: _native.MemoryWatcher | None = None
+        self._state_controller = None
         self._observation: np.ndarray | None = None
         self._closed = False
 
     def _stop(self) -> None:
+        self._state_controller = None
         if self._watcher is not None:
             try:
                 self._watcher.release_action()
@@ -244,16 +249,26 @@ class TH05CPUEnv(gym.Env):
         last_error = None
         for attempt in range(self.spawn_retries):
             shutil.copyfile(self.image_template, self._working_image)
+            self._state_file.unlink(missing_ok=True)
             try:
                 self._watcher = _native.MemoryWatcher(
                     spawn_dosbox=True,
                     image_path=str(self._working_image),
                     dosbox_executable=str(self.dosbox_executable),
+                    state_file=(
+                        str(self._state_file) if self.enable_state_branching else None
+                    ),
                 )
                 observation, info = self._read_ready_state()
                 # Rollouts are synchronous transactions: TH05 must not advance
                 # while the learner is selecting an action or updating PPO.
                 self._watcher.pause_game()
+                if self.enable_state_branching:
+                    from .branching import X11SaveStateController
+
+                    self._state_controller = X11SaveStateController(
+                        pid=self._watcher.pid(), state_file=self._state_file
+                    )
                 self._observation = observation
                 return observation.copy(), info
             except RuntimeError as error:
@@ -264,6 +279,112 @@ class TH05CPUEnv(gym.Env):
         raise RuntimeError(
             f"failed to spawn a readable TH05 process after {self.spawn_retries} attempts"
         ) from last_error
+
+    def _finish_step(self, deathbomb_intervention: bool):
+        assert self._watcher is not None
+        assert self._observation is not None
+        state = self._watcher.read_features()
+        if state is None:
+            raise RuntimeError("lost TH05 state while stepping")
+        features, end_flag, rewards, raw_frame = state
+        observation = np.asarray(features, dtype=np.float32)
+        miss_event = is_miss_transition(self._observation, observation)
+        reward_vector = np.asarray(rewards, dtype=np.float32)
+        scaled_reward_vector = reward_vector * self.reward_scales
+        reward = float(np.dot(scaled_reward_vector, self.reward_weights))
+        self._observation = observation
+
+        terminated = int(end_flag) != 0
+        info = {
+            "end_flag": int(end_flag),
+            "success": int(end_flag) == 2,
+            "miss_event": miss_event,
+            "reward_vector": reward_vector,
+            "scaled_reward_vector": scaled_reward_vector,
+            "raw_frame": raw_frame,
+            "action_mask": TH05_CONSTRAINTS.valid_actions(observation),
+            "deathbomb_intervention": bool(deathbomb_intervention),
+        }
+        return observation.copy(), reward, terminated, False, info
+
+    def _read_restored_state(self) -> tuple[np.ndarray, dict[str, Any]]:
+        assert self._watcher is not None
+        self._watcher.release_action()
+        self._watcher.clear_state()
+        state = self._watcher.read_features()
+        if state is None:
+            raise RuntimeError("lost TH05 state after save-state load")
+        features, end_flag, rewards, raw_frame = state
+        observation = np.asarray(features, dtype=np.float32)
+        self._observation = observation
+        return observation.copy(), {
+            "end_flag": int(end_flag),
+            "success": int(end_flag) == 2,
+            "miss_event": False,
+            "reward_vector": np.asarray(rewards, dtype=np.float32),
+            "scaled_reward_vector": np.asarray(rewards, dtype=np.float32)
+            * self.reward_scales,
+            "raw_frame": raw_frame,
+            "action_mask": TH05_CONSTRAINTS.valid_actions(observation),
+            "deathbomb_intervention": False,
+        }
+
+    def save_branch_state(self) -> tuple[np.ndarray, dict[str, Any]]:
+        """Create and immediately restore an offline-only emulator branch point."""
+        if self._watcher is None or self._state_controller is None:
+            raise RuntimeError(
+                "state branching is disabled; construct with enable_state_branching=True"
+            )
+        self._watcher.release_action()
+        self._state_controller.save_round_trip(
+            resume=self._watcher.resume_game,
+            pause=self._watcher.pause_game,
+            stage_frame=self._watcher.stage_frame,
+        )
+        return self._read_restored_state()
+
+    def load_branch_state(self) -> tuple[np.ndarray, dict[str, Any]]:
+        """Restore the current offline branch point and reset reward history."""
+        if self._watcher is None or self._state_controller is None:
+            raise RuntimeError(
+                "state branching is disabled; construct with enable_state_branching=True"
+            )
+        self._state_controller.load(
+            resume=self._watcher.resume_game,
+            pause=self._watcher.pause_game,
+            stage_frame=self._watcher.stage_frame,
+        )
+        return self._read_restored_state()
+
+    def step_native_frames(self, action: int, *, native_frames: int = 2):
+        """Advance an exact number of guest frames for offline branch labels."""
+        if self._watcher is None or self._observation is None:
+            raise RuntimeError("reset() must be called before step_native_frames()")
+        if not self.action_space.contains(action):
+            raise ValueError(f"invalid action {action}")
+        if native_frames < 1:
+            raise ValueError("native_frames must be positive")
+
+        start_frame = int(self._watcher.stage_frame())
+        target_frame = start_frame + int(native_frames)
+        deathbomb_intervention = self._watcher.apply_action_guarded(
+            int(action), self.deathbomb_guard
+        )
+        deadline = time.monotonic() + max(1.0, native_frames * 0.1)
+        self._watcher.resume_game()
+        try:
+            while int(self._watcher.stage_frame()) < target_frame:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(
+                        f"TH05 did not advance {native_frames} native frames"
+                    )
+                time.sleep(ACTION_REFRESH_INTERVAL_S)
+                deathbomb_intervention |= self._watcher.apply_action_guarded(
+                    int(action), self.deathbomb_guard
+                )
+        finally:
+            self._watcher.pause_game()
+        return self._finish_step(deathbomb_intervention)
 
     def step(self, action: int):
         if self._watcher is None or self._observation is None:
@@ -294,29 +415,7 @@ class TH05CPUEnv(gym.Env):
         finally:
             self._watcher.pause_game()
 
-        state = self._watcher.read_features()
-        if state is None:
-            raise RuntimeError("lost TH05 state while stepping")
-        features, end_flag, rewards, raw_frame = state
-        observation = np.asarray(features, dtype=np.float32)
-        miss_event = is_miss_transition(self._observation, observation)
-        reward_vector = np.asarray(rewards, dtype=np.float32)
-        scaled_reward_vector = reward_vector * self.reward_scales
-        reward = float(np.dot(scaled_reward_vector, self.reward_weights))
-        self._observation = observation
-
-        terminated = int(end_flag) != 0
-        info = {
-            "end_flag": int(end_flag),
-            "success": int(end_flag) == 2,
-            "miss_event": miss_event,
-            "reward_vector": reward_vector,
-            "scaled_reward_vector": scaled_reward_vector,
-            "raw_frame": raw_frame,
-            "action_mask": TH05_CONSTRAINTS.valid_actions(observation),
-            "deathbomb_intervention": bool(deathbomb_intervention),
-        }
-        return observation.copy(), reward, terminated, False, info
+        return self._finish_step(deathbomb_intervention)
 
     def close(self) -> None:
         if self._closed:

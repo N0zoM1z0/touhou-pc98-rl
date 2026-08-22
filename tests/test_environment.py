@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 
 from pc98rl import _native
+from pc98rl.branching import parse_window_ids
 from pc98rl.env import (
     MISS_COUNT_INDEX,
     describe_th05_scenario,
@@ -15,6 +16,9 @@ from pc98rl.env import (
 
 
 class EmulatorResolutionTest(unittest.TestCase):
+    def test_x11_window_parser_rejects_diagnostics(self):
+        self.assertEqual(parse_window_ids("123\nnot-a-window\n456\n"), ("123", "456"))
+
     def test_miss_event_comes_from_resident_counter_not_reward_sign(self):
         previous = np.zeros(273, dtype=np.float32)
         current = previous.copy()
@@ -65,6 +69,10 @@ class EmulatorResolutionTest(unittest.TestCase):
                     image_path=image.name,
                     dosbox_executable="/bin/false",
                 )
+
+    def test_state_file_requires_managed_emulator(self):
+        with self.assertRaisesRegex(ValueError, "state_file requires"):
+            _native.MemoryWatcher(state_file="branch.sav")
 
 
 if __name__ == "__main__":
