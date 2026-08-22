@@ -1,0 +1,220 @@
+{
+  "date": "2026-08-22",
+  "research_question": "Can expensive offline policy improvement reduce no-miss failures while leaving the deployed CPU actor and native safety path unchanged?",
+  "scenario": {
+    "stage": 1,
+    "patch_stage_index": 0,
+    "phase": 2,
+    "end_phase": 4,
+    "rank": 3,
+    "character": 2,
+    "power": 128,
+    "lives": 3,
+    "bombs": 3,
+    "step_limit": 2400
+  },
+  "deployment_contract": {
+    "device": "cpu",
+    "policy_interval_ms": 36,
+    "emulator_paused_during_inference": true,
+    "command_refresh_ms": 1,
+    "regular_bullet_safety_horizon": 6,
+    "deathbomb_safety": true,
+    "online_model_change": "actor weights only; architecture and parameter count are unchanged",
+    "source_checkpoint": "models/safety/th05-s1-lunatic-p2-p4-maskh6-selected.pt",
+    "source_sha256": "101d24f43b24b36522593bbe16bd0d1e2b267114421f8b595e6ec88b4965ea6a"
+  },
+  "negative_controls": {
+    "shield_aware_ppo": {
+      "training_seed": 9797,
+      "transitions": 32768,
+      "validation_seeds": [721, 722, 723, 724],
+      "validation_source_no_miss": 2,
+      "validation_selected_no_miss": 3,
+      "selected_update": 4,
+      "heldout_seeds": [731, 732, 733, 734, 735, 736, 737, 738],
+      "heldout_source": {
+        "clears": 7,
+        "no_miss_clears": 6,
+        "deaths": 1
+      },
+      "heldout_selected": {
+        "clears": 6,
+        "no_miss_clears": 5,
+        "deaths": 1
+      },
+      "decision": "reject fine-tuned update; retain initializer"
+    },
+    "success_only_elite_distillation": {
+      "collection_seeds": [
+        801,
+        802,
+        803,
+        804,
+        805,
+        806,
+        807,
+        808,
+        809,
+        810,
+        811,
+        812,
+        813,
+        814,
+        815,
+        816,
+        817,
+        818,
+        819,
+        820,
+        821,
+        822,
+        823,
+        824
+      ],
+      "attempts": 24,
+      "no_miss_elites": 15,
+      "attributable_actions": 22116,
+      "elite_bomb_histogram": {
+        "0": 2,
+        "1": 5,
+        "2": 6,
+        "3": 2
+      },
+      "update": "elite negative log likelihood plus behavior-policy KL; encoder, GRU, and critic frozen",
+      "selection_seeds": [841, 842, 843, 844],
+      "selected_epoch": 3,
+      "selection_source_no_miss": 2,
+      "selection_student_no_miss": 4,
+      "heldout_seeds": [851, 852, 853, 854, 855, 856, 857, 858],
+      "heldout_source": {
+        "clears": 6,
+        "no_miss_clears": 6,
+        "deaths": 0,
+        "mean_return": 3.762262
+      },
+      "heldout_student": {
+        "clears": 6,
+        "no_miss_clears": 6,
+        "deaths": 0,
+        "mean_return": 3.51182
+      },
+      "decision": "reject; success-only behavior cloning does not identify which sampled actions caused success"
+    }
+  },
+  "outcome_conditioned_actor_update": {
+    "collection_seeds": [
+      901,
+      902,
+      903,
+      904,
+      905,
+      906,
+      907,
+      908,
+      909,
+      910,
+      911,
+      912,
+      913,
+      914,
+      915,
+      916,
+      917,
+      918,
+      919,
+      920,
+      921,
+      922,
+      923,
+      924,
+      925,
+      926,
+      927,
+      928,
+      929,
+      930,
+      931,
+      932
+    ],
+    "attempts": 32,
+    "no_miss_clears": 26,
+    "negative_attempts": 6,
+    "deaths": 5,
+    "attributable_actions": 52719,
+    "no_miss_bomb_histogram": {
+      "0": 3,
+      "1": 10,
+      "2": 8,
+      "3": 5
+    },
+    "episode_utility": "1[no-miss clear] - deaths - 0.05*bombs_used",
+    "advantages": "episode utilities centered and standardized across the frozen behavior-policy dataset",
+    "objective": "clipped behavior-policy importance ratio plus behavior-to-student KL",
+    "policy_credit": "native mid-transaction overrides and all bomb actions excluded; movement actions remain attributable",
+    "trainable_parameters": "actor head only",
+    "epochs": 5,
+    "learning_rate": 0.0001,
+    "clip_ratio": 0.15,
+    "anchor_coefficient": 0.5,
+    "training_wall_seconds": 10.152,
+    "epoch_5_behavior_kl": 0.000609,
+    "selection_seeds": [951, 952, 953, 954],
+    "selected_epoch": 2,
+    "selection_source": {
+      "clears": 3,
+      "no_miss_clears": 2,
+      "deaths": 2,
+      "mean_return": 3.625191
+    },
+    "selection_student": {
+      "clears": 4,
+      "no_miss_clears": 4,
+      "deaths": 0,
+      "mean_return": 3.999858
+    },
+    "heldout_seeds": [961, 962, 963, 964, 965, 966, 967, 968],
+    "heldout_source": {
+      "clears": 8,
+      "no_miss_clears": 6,
+      "deaths": 2,
+      "mean_return": 3.812998,
+      "return_lcb": 3.603245
+    },
+    "heldout_student": {
+      "clears": 7,
+      "no_miss_clears": 7,
+      "deaths": 0,
+      "mean_return": 3.903475,
+      "return_lcb": 3.779458
+    },
+    "selection_objective_audit": {
+      "previous_order": "all clears, then no-miss clears, then return LCB",
+      "corrected_order": "no-miss clears, then all clears, then return LCB",
+      "reason": "the declared deployment objective is perfect completion, so a clear with a miss cannot outrank a no-miss clear",
+      "regression_test_added": true
+    },
+    "selected_checkpoint": "models/distill/th05-s1-lunatic-p2-p4-realtime-selected.pt",
+    "selected_sha256": "d8767f7dd293e796e43bae06885a0c44f852e65c83fff2bebe652cb960c8a081",
+    "decision": "provisionally accept for the next curriculum phase; improvement is small and based on eight held-out attempts"
+  },
+  "online_latency_audit": {
+    "checkpoint_sha256": "d8767f7dd293e796e43bae06885a0c44f852e65c83fff2bebe652cb960c8a081",
+    "cpu_threads": 1,
+    "parameters": 180456,
+    "warmup_decisions": 500,
+    "measured_decisions": 5000,
+    "shield_p99_ms": 0.049082,
+    "policy_and_sampling_p99_ms": 1.494406,
+    "complete_decision": {
+      "mean_ms": 1.375624,
+      "p50_ms": 1.367119,
+      "p95_ms": 1.481409,
+      "p99_ms": 1.529978,
+      "max_ms": 2.869757
+    },
+    "p99_fraction_of_36_ms_interval": 0.042499,
+    "interpretation": "the deployed decision path is small enough for real-time use on one CPU thread, and the transactional harness additionally pauses the emulator during inference"
+  },
+  "conclusion": "The online/offline separation is supported at the systems level and receives preliminary gameplay support. Success-only distillation and additional online PPO are rejected on held-out data. A conservative positive-and-negative outcome update improves held-out no-miss clears from 6/8 to 7/8 and removes two observed deaths without changing online architecture, while p99 decision latency remains 1.530 ms. This is not evidence of full-stage or cross-game mastery; the next test must move the curriculum start earlier and retain untouched evaluation seeds."
+}

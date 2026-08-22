@@ -41,9 +41,14 @@ eight of eight and reduces deaths from 19 to 14, but yields no no-miss clear.
 No full-stage run clears.  A subsequent control audit finds that one-shot
 memory input is timing-racy; transactional action refresh and a 1-ms native
 deathbomb guard cancel three otherwise fatal collisions, after which a fourth
-collision exhausts the available safety resource.  We document negative
-results, validity threats, and a path from the current TH05 adapter toward a
-common TH01--05 framework.
+collision exhausts the available safety resource.  Additional shield-aware PPO
+and success-only distillation both fail held-out tests.  In contrast, a frozen
+behavior-policy update using successful and failed trajectories improves phase
+2--4 held-out no-miss clears from 6/8 to 7/8 and observed deaths from two to
+zero while changing only the actor head.  The complete one-thread online
+decision path has 1.530 ms p99 latency, 4.25\% of its 36-ms interval.  No
+full-stage run clears.  We document negative results, validity threats, and a
+path toward a common TH01--05 framework.
 \end{abstract}
 
 \section{Research questions}
@@ -83,9 +88,10 @@ only preliminarily.  RQ4 has an underpowered comparative result.  An initial
 RQ5 auxiliary mechanism is rejected by a held-out pilot; a subsequent explicit
 miss-cost pilot improves the completion point estimate but produces no no-miss
 clear.  RQ6 is deliberately deferred until the agent can complete TH05 on its
-highest difficulty; only TH05 is currently validated.  The transactional actor
-and native guard provide initial systems evidence for RQ7, while teacher
-distillation remains untested.
+highest difficulty; only TH05 is currently validated.  The transactional actor,
+native guard, outcome-conditioned offline update, and latency audit provide
+preliminary evidence for RQ7.  Success-only distillation is rejected; a larger
+teacher remains untested.
 
 \section{Background and related work}
 
@@ -227,7 +233,7 @@ improved at 24,576 transitions regressed badly by 49,152.  Periodic immutable
 snapshots, a disjoint validation split, and an untouched paired test do not
 eliminate selection bias, but they make it visible and prevent the last update
 from becoming the result by accident.  Snapshot ranking is lexicographic:
-completion count, no-miss completion count, then lower-confidence-bound return.
+no-miss completion count, completion count, then lower-confidence-bound return.
 Workers retain episode-local death state so training metrics distinguish a
 successful clear from a no-miss clear even when an episode spans rollouts.
 
@@ -283,8 +289,9 @@ Global state and item features have small multilayer perceptrons (MLPs); the
 four summaries are fused into a 128-dimensional vector.  A one-layer GRU with
 128 hidden units models temporal context.  The actor predicts 19 discrete
 actions.  A shared critic head predicts three value components rather than
-collapsing objectives before value estimation.  The model contains 180,136
-parameters.
+collapsing objectives before value estimation.  The plain model contains
+180,136 parameters; enabling the two analytic-geometry token inputs used by the
+present deployment checkpoint raises this to 180,456.
 
 \subsection{CPU recurrent PPO}
 
@@ -308,8 +315,9 @@ a validation seed set using
 \begin{equation}
   S = \bar{R} - z\,\frac{s_R}{\sqrt{n}},
 \end{equation}
-after prioritizing observed stage successes.  Thus the last PPO update is not
-automatically considered the best model.
+after prioritizing observed no-miss stage successes and then ordinary stage
+successes.  Thus the last PPO update is not automatically considered the best
+model.
 
 Two post-baseline extensions are exposed for controlled ablation.  Analytic
 geometry appends bounded constant-velocity closest-approach features using
@@ -339,12 +347,34 @@ filtering; reversing that order allowed a downstream feasibility fallback to
 spend bombs before a collision.  Interventions are exposed in transition
 metadata rather than silently attributed to the sampled policy.
 
-This boundary also permits a future offline teacher to be more expensive than
-the deployed actor.  Counterfactual replay search, action-contrastive risk, and
+This boundary permits the offline learner to be more expensive than the
+deployed actor.  Counterfactual replay search, action-contrastive risk, and
 larger sequence models can label stored states; their movement decisions can
-then be distilled into a small recurrent actor.  ``Offline'' here names the
-learning plane, not a claim that the current PPO implementation is an offline-RL
-algorithm.
+then be distilled into the same small recurrent actor.  ``Offline'' here names
+the learning plane, not a claim that the main PPO implementation is an
+offline-RL algorithm.
+
+Our first offline control clones attributable actions from complete no-miss
+episodes and anchors the student to the frozen behavior policy.  It tests
+whether success filtering alone provides useful supervision.  The second
+method retains both positive and negative attempts sampled by a frozen policy.
+For episode $i$, utility is
+\begin{equation}
+  u_i = \mathbb{1}[\text{no-miss clear}_i] - n_{\mathrm{miss},i}
+        - 0.05 n_{\mathrm{bomb},i},
+\end{equation}
+and $A_i$ is the centered, standardized utility over the collection batch.  If
+$r_t(\theta)=\pi_\theta(a_t\mid s_t)/\pi_b(a_t\mid s_t)$, the actor-head update
+minimizes
+\begin{equation}
+  -\mathbb{E}_t\!\left[\min\!\left(r_t A_i,
+  \operatorname{clip}(r_t,1-\epsilon,1+\epsilon)A_i\right)\right]
+  + \beta\,D_{\mathrm{KL}}(\pi_b\,\|\,\pi_\theta).
+\end{equation}
+The encoder, GRU, and critic remain frozen.  Native mid-transaction overrides
+and all bomb actions are excluded from movement-policy credit.  This is a
+small-data conservative policy-improvement experiment, not a claim that an
+episode-level outcome solves temporal credit assignment.
 
 \section{Experimental protocol}
 
@@ -748,6 +778,84 @@ next policy experiment must reduce pre-collision risk, preferably using a
 stronger offline teacher or action-contrastive targets distilled into the small
 online actor.
 
+\subsection{Offline movement improvement and online latency}
+
+We first test whether simply continuing shield-aware PPO solves the residual
+movement problem.  A 32,768-transition run selects update 4 on validation, but
+on untouched seeds 731--738 the source obtains six no-miss clears and the update
+only five; both observe one death.  We reject the update.  Thus exposing PPO to
+the corrected online shield does not by itself improve this initializer.
+
+Success-only distillation is also insufficient.  Of 24 frozen-policy attempts,
+15 are complete no-miss trajectories containing 22,116 attributable movement
+actions.  An actor-only negative-log-likelihood update with a behavior-policy
+KL anchor reaches 4/4 no-miss on selection seeds, compared with 2/4 for its
+source.  On untouched seeds 851--858, however, both source and student obtain
+6/8 no-miss clears and zero deaths; the student's mean return is lower.  We
+reject this method because every sampled action in a successful episode is
+treated as positive, even when it did not cause success.
+
+The outcome-conditioned update instead retains 32 frozen-policy attempts: 26
+no-miss clears and six negative outcomes, including five total deaths.  Only
+the actor head is trained for five offline epochs; epoch 2 is selected on seeds
+951--954.  Training processes 52,719 attributable actions in 10.15 s, and the
+selected checkpoint changes no online module.  Table~\ref{tab:offline-outcome}
+shows the disjoint selection and held-out results.
+
+\begin{table}[ht]
+  \centering
+  \caption{Outcome-conditioned actor update.  ``Clear'' includes clears with a
+  miss; checkpoint ranking uses no-miss clear first.}
+  \label{tab:offline-outcome}
+  \begin{tabular}{lrrrrrr}
+    \toprule
+    & \multicolumn{3}{c}{Selection 951--954} &
+      \multicolumn{3}{c}{Held-out 961--968} \\
+    System & Clear & No-miss & Deaths & Clear & No-miss & Deaths \\
+    \midrule
+    Frozen source & 3/4 & 2/4 & 2 & \textbf{8/8} & 6/8 & 2 \\
+    Offline actor, epoch 2 & \textbf{4/4} & \textbf{4/4} & \textbf{0} &
+      7/8 & \textbf{7/8} & \textbf{0} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The held-out improvement is deliberately stated narrowly: no-miss completion
+rises by one of eight and two observed deaths disappear, while ordinary
+completion falls by one because the student has a no-death timeout.  This is a
+better match to the declared perfect-clear objective, not evidence of a large
+or statistically settled effect.  An audit found that the selection tool had
+previously ranked ordinary completion before no-miss completion; the order and
+a regression test are now corrected.
+
+Finally, we benchmark the selected student's complete decision path on one CPU
+thread using a paused live-game state, 500 warm-up decisions, and 5,000 measured
+decisions.  Table~\ref{tab:online-latency} includes the audited masks, recurrent
+forward pass, and categorical sampling.  The 1.530-ms complete-path p99 consumes
+4.25\% of the 36-ms interval.  In the transactional harness, inference occurs
+while the emulator is paused, so even a tail outlier cannot advance hidden game
+time; the benchmark additionally shows sufficient headroom for an unpaused
+deployment.
+
+\begin{table}[ht]
+  \centering
+  \caption{One-thread online latency in milliseconds over 5,000 decisions.}
+  \label{tab:online-latency}
+  \begin{tabular}{lrrrrr}
+    \toprule
+    Component & Mean & p50 & p95 & p99 & Max \\
+    \midrule
+    Native/audited shields & 0.034 & 0.034 & 0.038 & 0.049 & 0.067 \\
+    Policy and sampling & 1.341 & 1.333 & 1.446 & 1.494 & 2.837 \\
+    Complete decision & 1.376 & 1.367 & 1.481 & 1.530 & 2.870 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Exact datasets, seeds, checksums, negative controls, and latency quantiles are
+recorded in
+\path{experiments/2026-08-22-th05-lunatic-offline-online.json}.
+
 \section{Threats to validity}
 
 \begin{itemize}
@@ -756,6 +864,10 @@ online actor.
   full-stage clear occurs.
   \item Evaluation seeds control action sampling, but the native game does not
   yet expose a separately controlled environment RNG seed.
+  \item The outcome-conditioned update uses only 32 behavior-policy episodes
+  and assigns one utility to every attributable movement in an episode.  Its
+  7/8 versus 6/8 held-out no-miss result is a promising pilot, not resolved
+  long-horizon causal credit or a confidence-bounded improvement claim.
   \item The comparison model has no reproducible compatible checkpoint, so
   systems comparisons do not imply a gameplay win over prior work.
   \item Learning evidence is limited to TH05 Stage 2 full-stage training and
@@ -834,6 +946,14 @@ against its source policy on held-out no-miss completion, intervention count,
 and inference latency; reject any teacher improvement that disappears after
 distillation.
 
+The success-only student is rejected because its 4/4 selection result falls to
+the source's 6/8 no-miss rate on held-out seeds.  A positive-and-negative
+outcome update provisionally passes: it moves held-out no-miss clears from 6/8
+to 7/8, removes two observed deaths, and retains a 1.530-ms complete-path p99.
+H7 is therefore supported as an architectural separation and remains open as a
+learning hypothesis.  The next test moves the phase boundary earlier; a larger
+teacher is justified only if this conservative actor update stops improving.
+
 \paragraph{H8: old-five-games interface.}
 Define per-game contracts for observation schema, action meaning, terminal
 flags, executable identity, and reset.  TH01--04 enter the benchmark only after
@@ -852,11 +972,14 @@ completion without producing a no-miss clear.  An audited regular-bullet mask
 then preserves 8/8 completion and reduces misses from 15 to 14, but again
 produces zero no-miss clears.  Transactional input and a 1-ms online deathbomb
 guard then cancel three consecutive fatal collisions, but a fourth occurs after
-resources are exhausted.  The persistent gap now motivates stronger
-pre-collision movement learned offline and distilled into a deadline-bounded
-online actor, rather than a claim of mastery.  The main scientific task is to
-turn this systems baseline into a pre-registered multi-configuration study with
-full-stage completion metrics.
+resources are exhausted.  Shield-aware PPO and success-only distillation fail
+their held-out tests.  A conservative offline update using positive and
+negative episode outcomes then improves phase 2--4 held-out no-miss clears from
+6/8 to 7/8 and deaths from two to zero while leaving the online architecture
+unchanged; its complete decision p99 is 1.530 ms on one CPU thread.  This is
+preliminary short-phase progress, not mastery.  The main scientific task is to
+move the curriculum boundary toward the full stage and convert the systems
+baseline into a pre-registered multi-configuration study.
 
 \bibliographystyle{plain}
 \bibliography{references}
