@@ -249,6 +249,23 @@ impl RawFrame {
             && (self.state.player.player_is_hit
                 || (33..=40).contains(&self.state.player.miss_frame))
     }
+
+    /// Read-only deployment diagnostics. These values are not policy features.
+    pub fn stage_frame(&self) -> u32 {
+        self.state.resident.frames
+    }
+
+    pub fn boss_phase(&self) -> Option<u8> {
+        self.state.boss.as_ref().map(|boss| boss.phase)
+    }
+
+    pub fn boss_phase_frame(&self) -> Option<i16> {
+        self.state.boss.as_ref().map(|boss| boss.phase_frame)
+    }
+
+    pub fn boss_hp(&self) -> Option<i16> {
+        self.state.boss.as_ref().map(|boss| boss.hp)
+    }
 }
 
 #[pyclass]
@@ -886,5 +903,14 @@ mod tests {
         assert!(frame.deathbomb_window_active());
         frame.state.player.invincible_via_bomb = true;
         assert!(!frame.deathbomb_window_active());
+    }
+
+    #[test]
+    fn empty_raw_frame_has_progress_diagnostics() {
+        let frame = RawFrame::new();
+        assert_eq!(frame.stage_frame(), 0);
+        assert_eq!(frame.boss_phase(), None);
+        assert_eq!(frame.boss_phase_frame(), None);
+        assert_eq!(frame.boss_hp(), None);
     }
 }

@@ -256,6 +256,18 @@ def evaluate(
             6,
         ),
         "final_xy": observation[:2].round(4).tolist(),
+        "final_progress": {
+            "stage_frame": raw_frame.stage_frame(),
+            "boss_phase": raw_frame.boss_phase(),
+            "boss_phase_frame": raw_frame.boss_phase_frame(),
+            "boss_hp": raw_frame.boss_hp(),
+            "boss_present": bool(observation[17] > 0.5),
+            "boss_hp_normalized": round(float(observation[18]), 6),
+            "power": int(round(float(observation[8]) * 128.0)),
+            "lives": int(round(float(observation[9]) * 8.0)),
+            "bombs": int(round(float(observation[10]) * 8.0)),
+            "resident_misses": int(round(float(observation[34]) * 10.0)),
+        },
         "action_counts": action_counts.tolist(),
     }
 
