@@ -12,14 +12,23 @@ from pc98rl.safety import (
 
 
 class _FakeRawFrame:
-    def __init__(self, mask, *, deathbomb=False):
+    def __init__(self, mask, *, survival=None, deathbomb=False):
         self.mask = mask
+        self.survival = survival
         self.deathbomb = deathbomb
         self.calls = []
 
     def regular_bullet_action_mask(self, horizon_frames, extra_margin_px):
         self.calls.append((horizon_frames, extra_margin_px))
         return self.mask
+
+    def regular_bullet_action_survival_frames(
+        self, horizon_frames, extra_margin_px
+    ):
+        self.calls.append((horizon_frames, extra_margin_px))
+        if self.survival is None:
+            return np.where(self.mask, horizon_frames, 0)
+        return self.survival
 
     def deathbomb_window_active(self):
         return self.deathbomb
@@ -39,7 +48,22 @@ class AuditedRegularBulletShieldTest(unittest.TestCase):
         self.assertFalse(mask[2])
         self.assertEqual(frame.calls, [(3, 0.5)])
 
-    def test_fails_open_if_combination_is_empty(self):
+    def test_empty_combination_keeps_only_longest_survival(self):
+        base = np.zeros(19, dtype=np.bool_)
+        base[[3, 4, 5]] = True
+        native = np.ones(19, dtype=np.bool_)
+        native[[3, 4, 5]] = False
+        survival = np.zeros(19, dtype=np.int16)
+        survival[[3, 4, 5]] = [1, 3, 2]
+        mask, intervened = AuditedRegularBulletShield(
+            least_risk_fallback=True
+        ).apply(
+            _FakeRawFrame(native, survival=survival), base
+        )
+        self.assertEqual(np.flatnonzero(mask).tolist(), [4])
+        self.assertTrue(intervened)
+
+    def test_default_preserves_audited_fail_open_baseline(self):
         base = np.zeros(19, dtype=np.bool_)
         base[4] = True
         native = np.ones(19, dtype=np.bool_)

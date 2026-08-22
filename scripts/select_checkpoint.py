@@ -28,6 +28,7 @@ def _evaluate_task(task: tuple) -> tuple[str, dict]:
         seed,
         regular_bullet_safety_horizon,
         regular_bullet_safety_margin,
+        regular_bullet_least_risk_fallback,
         deathbomb_safety,
     ) = task
     result = evaluate(
@@ -39,6 +40,7 @@ def _evaluate_task(task: tuple) -> tuple[str, dict]:
         seed=seed,
         regular_bullet_safety_horizon=regular_bullet_safety_horizon,
         regular_bullet_safety_margin=regular_bullet_safety_margin,
+        regular_bullet_least_risk_fallback=regular_bullet_least_risk_fallback,
         deathbomb_safety=deathbomb_safety,
     )
     return snapshot, result
@@ -69,6 +71,11 @@ def main() -> None:
     parser.add_argument("--deterministic", action="store_true")
     parser.add_argument("--regular-bullet-safety-horizon", type=int, default=None)
     parser.add_argument("--regular-bullet-safety-margin", type=float, default=None)
+    parser.add_argument(
+        "--regular-bullet-least-risk-fallback",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+    )
     parser.add_argument(
         "--deathbomb-safety",
         action=argparse.BooleanOptionalAction,
@@ -101,6 +108,7 @@ def main() -> None:
             seed,
             args.regular_bullet_safety_horizon,
             args.regular_bullet_safety_margin,
+            args.regular_bullet_least_risk_fallback,
             args.deathbomb_safety,
         )
         for snapshot in snapshot_strings
@@ -154,6 +162,9 @@ def main() -> None:
         "deterministic": args.deterministic,
         "regular_bullet_safety_horizon": args.regular_bullet_safety_horizon,
         "regular_bullet_safety_margin": args.regular_bullet_safety_margin,
+        "regular_bullet_least_risk_fallback": (
+            args.regular_bullet_least_risk_fallback
+        ),
         "deathbomb_safety": args.deathbomb_safety,
         "lcb_z": args.lcb_z,
         "selected": best["snapshot"],

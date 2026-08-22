@@ -37,6 +37,7 @@ def evaluate(
     emergency_bomb_horizon: float | None = None,
     regular_bullet_safety_horizon: int | None = None,
     regular_bullet_safety_margin: float | None = None,
+    regular_bullet_least_risk_fallback: bool | None = None,
     deathbomb_safety: bool | None = None,
 ) -> dict:
     """Run one fixed-seed episode prefix and return JSON-serializable metrics."""
@@ -78,6 +79,12 @@ def evaluate(
                 regular_bullet_safety_margin = float(
                     saved.get("args", {}).get("regular_bullet_safety_margin", 0.0)
                 )
+            if regular_bullet_least_risk_fallback is None:
+                regular_bullet_least_risk_fallback = bool(
+                    saved.get("args", {}).get(
+                        "regular_bullet_least_risk_fallback", False
+                    )
+                )
             if deathbomb_safety is None:
                 deathbomb_safety = bool(
                     saved.get("args", {}).get("deathbomb_safety", False)
@@ -100,12 +107,15 @@ def evaluate(
         regular_bullet_safety_horizon = 0
     if regular_bullet_safety_margin is None:
         regular_bullet_safety_margin = 0.0
+    if regular_bullet_least_risk_fallback is None:
+        regular_bullet_least_risk_fallback = False
     if deathbomb_safety is None:
         deathbomb_safety = False
     regular_bullet_shield = (
         AuditedRegularBulletShield(
             horizon_frames=regular_bullet_safety_horizon,
             extra_margin_px=regular_bullet_safety_margin,
+            least_risk_fallback=regular_bullet_least_risk_fallback,
         )
         if regular_bullet_safety_horizon > 0
         else None
@@ -260,6 +270,12 @@ def evaluate(
         "emergency_bomb_interventions": emergency_bomb_interventions,
         "regular_bullet_safety_horizon": regular_bullet_safety_horizon,
         "regular_bullet_safety_margin": regular_bullet_safety_margin,
+        "regular_bullet_least_risk_fallback": regular_bullet_least_risk_fallback,
+        "regular_bullet_least_risk_fallbacks": (
+            regular_bullet_shield.fallback_count
+            if regular_bullet_shield is not None
+            else 0
+        ),
         "regular_bullet_interventions": regular_bullet_interventions,
         "deathbomb_safety": deathbomb_safety,
         "deathbomb_interventions": deathbomb_interventions,
@@ -307,6 +323,11 @@ def main() -> None:
     parser.add_argument("--regular-bullet-safety-horizon", type=int, default=None)
     parser.add_argument("--regular-bullet-safety-margin", type=float, default=None)
     parser.add_argument(
+        "--regular-bullet-least-risk-fallback",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+    )
+    parser.add_argument(
         "--deathbomb-safety",
         action=argparse.BooleanOptionalAction,
         default=None,
@@ -327,6 +348,9 @@ def main() -> None:
         emergency_bomb_horizon=args.emergency_bomb_horizon,
         regular_bullet_safety_horizon=args.regular_bullet_safety_horizon,
         regular_bullet_safety_margin=args.regular_bullet_safety_margin,
+        regular_bullet_least_risk_fallback=(
+            args.regular_bullet_least_risk_fallback
+        ),
         deathbomb_safety=args.deathbomb_safety,
     )
     print(json.dumps(result, sort_keys=True), flush=True)

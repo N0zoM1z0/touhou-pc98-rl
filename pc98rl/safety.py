@@ -124,13 +124,21 @@ class EmergencyBombShield:
 class AuditedRegularBulletShield:
     """Combine the native ReC98-derived regular-bullet mask with base rules."""
 
-    def __init__(self, *, horizon_frames: int = 2, extra_margin_px: float = 0.0):
+    def __init__(
+        self,
+        *,
+        horizon_frames: int = 2,
+        extra_margin_px: float = 0.0,
+        least_risk_fallback: bool = False,
+    ):
         if not 1 <= horizon_frames <= 16:
             raise ValueError("horizon_frames must be between 1 and 16")
         if not np.isfinite(extra_margin_px) or extra_margin_px < 0.0:
             raise ValueError("extra_margin_px must be finite and non-negative")
         self.horizon_frames = int(horizon_frames)
         self.extra_margin_px = float(extra_margin_px)
+        self.least_risk_fallback = bool(least_risk_fallback)
+        self.fallback_count = 0
 
     def apply(self, raw_frame, base_mask: np.ndarray) -> tuple[np.ndarray, bool]:
         base_mask = np.asarray(base_mask, dtype=np.bool_)
@@ -145,11 +153,31 @@ class AuditedRegularBulletShield:
         if native_mask.shape != base_mask.shape:
             raise ValueError("native regular-bullet mask has the wrong shape")
         combined = base_mask & native_mask
-        # If boundaries/resources remove every native-safe choice, retaining
-        # the base mask is better than deadlocking the policy. A legal bomb is
-        # included by the native mask and prevents this fallback when present.
+        # When boundaries/resources remove every horizon-safe choice, keep the
+        # policy inside the subset with the latest projected collision.  A
+        # fail-open fallback would knowingly restore more immediate collisions.
+        # A legal bomb is included by the native mask and therefore prevents
+        # this movement-only fallback when present.
         if not combined.any():
-            return base_mask.copy(), False
+            if not self.least_risk_fallback:
+                return base_mask.copy(), False
+            survival = np.asarray(
+                raw_frame.regular_bullet_action_survival_frames(
+                    self.horizon_frames, self.extra_margin_px
+                ),
+                dtype=np.int16,
+            )
+            if survival.shape != base_mask.shape:
+                raise ValueError(
+                    "native regular-bullet survival vector has the wrong shape"
+                )
+            legal_survival = np.where(base_mask, survival, -1)
+            longest = int(legal_survival.max())
+            if longest < 0:
+                return base_mask.copy(), False
+            combined = base_mask & (survival == longest)
+            self.fallback_count += 1
+            return combined, bool(np.any(base_mask & ~combined))
         intervened = bool(np.any(base_mask & ~combined))
         return combined, intervened
 

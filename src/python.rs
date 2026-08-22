@@ -72,23 +72,23 @@ fn movement_velocity_px(action: usize, playchar: u8) -> (f32, f32) {
     }
 }
 
-fn regular_bullet_action_mask(
+fn regular_bullet_action_survival_frames(
     state: &GameState,
     horizon_frames: u8,
     extra_margin_px: f32,
-) -> Vec<bool> {
-    let mut mask = vec![true; 19];
+) -> Vec<u8> {
+    let mut survival_frames = vec![horizon_frames; 19];
     if state.player.invincibility_time > 0
         || state.player.invincible_via_bomb
         || state.player.miss_frame > 0
     {
-        return mask;
+        return survival_frames;
     }
     let (player_x, player_y) = state.player.pos.to_pixels();
     let extent = REGULAR_BULLET_KILLBOX_HALF_EXTENT_PX + extra_margin_px;
-    for (action, valid) in mask[..18].iter_mut().enumerate() {
+    for (action, survival) in survival_frames[..18].iter_mut().enumerate() {
         let (player_vx, player_vy) = movement_velocity_px(action, state.resident.playchar);
-        'bullets: for bullet in state.get_active_bullets() {
+        for bullet in state.get_active_bullets() {
             // ReC98: spawn flags 3 and above are the delay cloud, and move
             // flags 4 and above are decay. Neither state has a hitbox.
             if bullet.spawn_flag >= 3 || bullet.move_flag >= 4 {
@@ -105,8 +105,8 @@ fn regular_bullet_action_mask(
                 let dx = bullet_x - player_x + (bullet_vx - player_vx) * time;
                 let dy = bullet_y - player_y + (bullet_vy - player_vy) * time;
                 if collision_active && dx.abs() <= extent && dy.abs() <= extent {
-                    *valid = false;
-                    break 'bullets;
+                    *survival = (*survival).min(frame - 1);
+                    break;
                 }
                 if !collision_active
                     && dx >= -REGULAR_BULLET_GRAZE_LEFT_PX
@@ -118,7 +118,18 @@ fn regular_bullet_action_mask(
             }
         }
     }
-    mask
+    survival_frames
+}
+
+fn regular_bullet_action_mask(
+    state: &GameState,
+    horizon_frames: u8,
+    extra_margin_px: f32,
+) -> Vec<bool> {
+    regular_bullet_action_survival_frames(state, horizon_frames, extra_margin_px)
+        .into_iter()
+        .map(|frames| frames == horizon_frames)
+        .collect()
 }
 #[allow(clippy::new_without_default)]
 // You clippy self touch the code here and got beated...
@@ -236,6 +247,31 @@ impl RawFrame {
             ));
         }
         Ok(regular_bullet_action_mask(
+            &self.state,
+            horizon_frames,
+            extra_margin_px,
+        ))
+    }
+
+    /// Number of projected collision-free frames for every action.  This is
+    /// used only to choose the least-immediate risk when no movement is safe
+    /// for the complete requested horizon.
+    pub fn regular_bullet_action_survival_frames(
+        &self,
+        horizon_frames: u8,
+        extra_margin_px: f32,
+    ) -> PyResult<Vec<u8>> {
+        if horizon_frames == 0 || horizon_frames > 16 {
+            return Err(PyValueError::new_err(
+                "horizon_frames must be between 1 and 16",
+            ));
+        }
+        if !extra_margin_px.is_finite() || extra_margin_px < 0.0 {
+            return Err(PyValueError::new_err(
+                "extra_margin_px must be finite and non-negative",
+            ));
+        }
+        Ok(regular_bullet_action_survival_frames(
             &self.state,
             horizon_frames,
             extra_margin_px,
@@ -758,7 +794,10 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{MemoryWatcher, RawFrame, regular_bullet_action_mask};
+    use super::{
+        MemoryWatcher, RawFrame, regular_bullet_action_mask,
+        regular_bullet_action_survival_frames,
+    };
     use crate::games::th05_c::types::{Bullet, PlayfieldMotion};
 
     #[test]
@@ -811,6 +850,11 @@ mod tests {
         assert!(mask[1]);
         assert!(!mask[2]);
         assert!(mask[18]);
+        let survival = regular_bullet_action_survival_frames(&frame.state, 2, 0.0);
+        assert!(survival[0] < 2);
+        assert_eq!(survival[1], 2);
+        assert!(survival[2] < 2);
+        assert_eq!(survival[18], 2);
     }
 
     #[test]

@@ -39,6 +39,9 @@ def main() -> None:
     parser.add_argument("--deadline-ms", type=float, default=36.0)
     parser.add_argument("--regular-bullet-safety-horizon", type=int, default=6)
     parser.add_argument("--regular-bullet-safety-margin", type=float, default=0.0)
+    parser.add_argument(
+        "--regular-bullet-least-risk-fallback", action="store_true"
+    )
     parser.add_argument("--report")
     args = parser.parse_args()
     if args.iterations < 1 or args.warmup < 0:
@@ -62,6 +65,7 @@ def main() -> None:
     regular = AuditedRegularBulletShield(
         horizon_frames=args.regular_bullet_safety_horizon,
         extra_margin_px=args.regular_bullet_safety_margin,
+        least_risk_fallback=args.regular_bullet_least_risk_fallback,
     )
     deathbomb = DeathbombShield()
     env = TH05CPUEnv(args.image, deathbomb_guard=True)
@@ -119,6 +123,9 @@ def main() -> None:
         ),
         "transactional_pause_during_inference": True,
         "regular_bullet_safety_horizon": args.regular_bullet_safety_horizon,
+        "regular_bullet_least_risk_fallback": (
+            args.regular_bullet_least_risk_fallback
+        ),
         "deathbomb_safety": True,
     }
     if args.report:
