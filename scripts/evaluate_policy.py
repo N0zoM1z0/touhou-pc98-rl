@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from pc98rl.distributions import MaskedCategorical
 from pc98rl.env import TH05CPUEnv, TH05_KINEMATICS, describe_th05_scenario
 from pc98rl.heuristic import SafetyHeuristic
+from pc98rl.safety import EmergencyBombShield
 
 
 def evaluate(
@@ -28,6 +29,8 @@ def evaluate(
     seed: int = 20260822,
     analytic_geometry: bool = False,
     hard_safety: bool | None = None,
+    emergency_bomb_clearance: float | None = None,
+    emergency_bomb_horizon: float | None = None,
 ) -> dict:
     """Run one fixed-seed episode prefix and return JSON-serializable metrics."""
     rng = np.random.default_rng(seed)
@@ -52,6 +55,14 @@ def evaluate(
             )
             if hard_safety is None:
                 hard_safety = bool(saved.get("args", {}).get("hard_safety", False))
+            if emergency_bomb_clearance is None:
+                emergency_bomb_clearance = float(
+                    saved.get("args", {}).get("emergency_bomb_clearance", 0.0)
+                )
+            if emergency_bomb_horizon is None:
+                emergency_bomb_horizon = float(
+                    saved.get("args", {}).get("emergency_bomb_horizon", 6.0)
+                )
         torch.manual_seed(seed)
         model = EntityActorCritic(
             analytic_geometry=analytic_geometry,
@@ -62,6 +73,19 @@ def evaluate(
         hidden = torch.zeros(1, 1, model.hidden_size)
     if hard_safety is None:
         hard_safety = False
+    if emergency_bomb_clearance is None:
+        emergency_bomb_clearance = 0.0
+    if emergency_bomb_horizon is None:
+        emergency_bomb_horizon = 6.0
+    bomb_shield = (
+        EmergencyBombShield(
+            TH05_KINEMATICS,
+            clearance_px=emergency_bomb_clearance,
+            horizon_steps=emergency_bomb_horizon,
+        )
+        if emergency_bomb_clearance > 0.0
+        else None
+    )
     env = TH05CPUEnv(image)
     reward_vector = np.zeros(3, dtype=np.float64)
     scalar_return = 0.0
@@ -73,6 +97,7 @@ def evaluate(
     end_flag = 0
     constrained_steps = 0
     removed_probability_mass = 0.0
+    emergency_bomb_interventions = 0
     observation = np.zeros(env.observation_space.shape, dtype=np.float32)
     scenario = None
     try:
@@ -80,17 +105,28 @@ def evaluate(
         scenario = describe_th05_scenario(observation)
         action_mask = info["action_mask"]
         for _ in range(steps):
+            effective_action_mask = (
+                action_mask.copy()
+                if hard_safety
+                else np.ones_like(action_mask, dtype=np.bool_)
+            )
+            intervention = False
+            if bomb_shield is not None:
+                effective_action_mask, intervention = bomb_shield.apply(
+                    observation, effective_action_mask
+                )
+                emergency_bomb_interventions += int(intervention)
             if policy == "random":
-                if hard_safety:
-                    valid_actions = np.flatnonzero(action_mask)
+                if hard_safety or bomb_shield is not None:
+                    valid_actions = np.flatnonzero(effective_action_mask)
                     action = int(rng.choice(valid_actions))
                     removed_probability_mass += 1.0 - len(valid_actions) / 19.0
                 else:
                     action = int(rng.integers(19))
             elif policy == "teacher":
                 action = teacher.act(observation)
-                if hard_safety and not action_mask[action]:
-                    action = int(np.flatnonzero(action_mask)[0])
+                if not effective_action_mask[action]:
+                    action = int(np.flatnonzero(effective_action_mask)[0])
             else:
                 with torch.no_grad():
                     logits, _, hidden = model.forward_step(
@@ -99,8 +135,8 @@ def evaluate(
                     distribution = MaskedCategorical(
                         logits=logits,
                         valid_mask=(
-                            torch.from_numpy(action_mask).unsqueeze(0)
-                            if hard_safety
+                            torch.from_numpy(effective_action_mask).unsqueeze(0)
+                            if hard_safety or bomb_shield is not None
                             else None
                         ),
                     )
@@ -111,7 +147,7 @@ def evaluate(
                         action = int(distribution.mode.item())
                     else:
                         action = int(distribution.sample().item())
-            constrained_steps += int(hard_safety and np.any(~action_mask))
+            constrained_steps += int(np.any(~effective_action_mask))
             action_counts[action] += 1
             observation, reward, terminal, truncated, info = env.step(action)
             action_mask = info["action_mask"]
@@ -141,6 +177,9 @@ def evaluate(
         "scenario": scenario,
         "analytic_geometry": analytic_geometry if model is not None else None,
         "hard_safety": hard_safety,
+        "emergency_bomb_clearance": emergency_bomb_clearance,
+        "emergency_bomb_horizon": emergency_bomb_horizon,
+        "emergency_bomb_interventions": emergency_bomb_interventions,
         "constrained_step_fraction": round(
             constrained_steps / completed_steps if completed_steps else 0.0, 6
         ),
@@ -168,6 +207,8 @@ def main() -> None:
         default=None,
         help="override the checkpoint's adapter-certified action mask setting",
     )
+    parser.add_argument("--emergency-bomb-clearance", type=float, default=None)
+    parser.add_argument("--emergency-bomb-horizon", type=float, default=None)
     parser.add_argument("--steps", type=int, default=1_200)
     parser.add_argument("--seed", type=int, default=20260822)
     args = parser.parse_args()
@@ -180,6 +221,8 @@ def main() -> None:
         seed=args.seed,
         analytic_geometry=args.analytic_geometry,
         hard_safety=args.hard_safety,
+        emergency_bomb_clearance=args.emergency_bomb_clearance,
+        emergency_bomb_horizon=args.emergency_bomb_horizon,
     )
     print(json.dumps(result, sort_keys=True), flush=True)
 

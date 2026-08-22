@@ -26,6 +26,7 @@ from .env import (
     describe_th05_scenario,
 )
 from .model import FEATURE_DIM, EntityActorCritic, FutureMissHead
+from .safety import EmergencyBombShield
 
 
 def _worker_main(connection, image: str, frame_interval_s: float, seed: int) -> None:
@@ -352,6 +353,10 @@ def train(args: argparse.Namespace) -> None:
         raise ValueError("future-miss-auxiliary-coefficient must be non-negative")
     if args.extra_miss_penalty < 0.0:
         raise ValueError("extra-miss-penalty must be non-negative")
+    if args.emergency_bomb_clearance < 0.0:
+        raise ValueError("emergency-bomb-clearance must be non-negative")
+    if args.emergency_bomb_horizon <= 0.0:
+        raise ValueError("emergency-bomb-horizon must be positive")
     risk_horizons = tuple(args.future_miss_horizons)
     if any(horizon < 1 for horizon in risk_horizons):
         raise ValueError("future-miss-horizons must be positive")
@@ -417,6 +422,17 @@ def train(args: argparse.Namespace) -> None:
         )
         if saved_miss_penalty != args.extra_miss_penalty:
             raise ValueError("extra-miss-penalty must match when resuming")
+        saved_clearance = float(
+            resume_checkpoint.get("args", {}).get("emergency_bomb_clearance", 0.0)
+        )
+        saved_horizon = float(
+            resume_checkpoint.get("args", {}).get("emergency_bomb_horizon", 6.0)
+        )
+        if (saved_clearance, saved_horizon) != (
+            args.emergency_bomb_clearance,
+            args.emergency_bomb_horizon,
+        ):
+            raise ValueError("emergency bomb settings must match when resuming")
         saved_risk_enabled = resume_checkpoint.get("future_miss_head") is not None
         if saved_risk_enabled != risk_enabled:
             raise ValueError(
@@ -468,6 +484,15 @@ def train(args: argparse.Namespace) -> None:
     scenario = scenarios[0]
     hidden = torch.zeros(1, args.workers, model.hidden_size)
     objective_weights = np.asarray(args.objective_weights, dtype=np.float32)
+    bomb_shield = (
+        EmergencyBombShield(
+            TH05_KINEMATICS,
+            clearance_px=args.emergency_bomb_clearance,
+            horizon_steps=args.emergency_bomb_horizon,
+        )
+        if args.emergency_bomb_clearance > 0.0
+        else None
+    )
     started = time.perf_counter()
     try:
         if any(item != scenario for item in scenarios[1:]):
@@ -496,24 +521,31 @@ def train(args: argparse.Namespace) -> None:
                 (args.rollout_steps, args.workers), dtype=np.bool_
             )
             removed_probability_mass = 0.0
+            emergency_bomb_interventions = 0
             successes = failures = no_miss_successes = 0
 
             model.eval()
             for step in range(args.rollout_steps):
                 observations[step] = observation
                 hidden_states[step] = hidden[0].numpy()
-                action_masks[step] = action_mask
+                effective_action_mask = (
+                    action_mask.copy()
+                    if args.hard_safety
+                    else np.ones_like(action_mask, dtype=np.bool_)
+                )
+                if bomb_shield is not None:
+                    effective_action_mask, interventions = bomb_shield.apply(
+                        observation, effective_action_mask
+                    )
+                    emergency_bomb_interventions += int(np.count_nonzero(interventions))
+                action_masks[step] = effective_action_mask
                 with torch.no_grad():
                     logits, value, next_hidden = model.forward_step(
                         torch.from_numpy(observation), hidden
                     )
                     distribution = MaskedCategorical(
                         logits=logits,
-                        valid_mask=(
-                            torch.from_numpy(action_mask)
-                            if args.hard_safety
-                            else None
-                        ),
+                        valid_mask=torch.from_numpy(effective_action_mask),
                     )
                     action = distribution.sample()
                     log_probability = distribution.log_prob(action)
@@ -655,7 +687,7 @@ def train(args: argparse.Namespace) -> None:
                         )
                     distribution = MaskedCategorical(
                         logits=logits,
-                        valid_mask=action_mask_batch if args.hard_safety else None,
+                        valid_mask=action_mask_batch,
                     )
                     new_log = distribution.log_prob(actions_batch)
                     log_ratio = new_log - old_log_batch
@@ -740,6 +772,9 @@ def train(args: argparse.Namespace) -> None:
                 "reward_mean": np.mean(rewards, axis=(0, 1)).round(6).tolist(),
                 "death_events": int(np.count_nonzero(miss_events)),
                 "extra_miss_penalty": args.extra_miss_penalty,
+                "emergency_bomb_clearance": args.emergency_bomb_clearance,
+                "emergency_bomb_horizon": args.emergency_bomb_horizon,
+                "emergency_bomb_interventions": emergency_bomb_interventions,
                 "action_frequency": (
                     np.bincount(actions.reshape(-1), minlength=19) / actions.size
                 ).round(4).tolist(),
@@ -753,13 +788,13 @@ def train(args: argparse.Namespace) -> None:
                 "initialization": initialization,
                 "constrained_step_fraction": round(
                     float(np.mean(np.any(~action_masks, axis=-1)))
-                    if args.hard_safety
+                    if args.hard_safety or bomb_shield is not None
                     else 0.0,
                     6,
                 ),
                 "removed_probability_mass": round(
                     removed_probability_mass / (args.rollout_steps * args.workers)
-                    if args.hard_safety
+                    if args.hard_safety or bomb_shield is not None
                     else 0.0,
                     6,
                 ),
@@ -845,6 +880,18 @@ def parse_args() -> argparse.Namespace:
         "--hard-safety",
         action="store_true",
         help="renormalize the policy over adapter-certified valid actions",
+    )
+    parser.add_argument(
+        "--emergency-bomb-clearance",
+        type=float,
+        default=0.0,
+        help="force a policy-accounted bomb inside this predicted clearance (0 disables)",
+    )
+    parser.add_argument(
+        "--emergency-bomb-horizon",
+        type=float,
+        default=6.0,
+        help="constant-velocity prediction horizon in native game frames",
     )
     parser.add_argument(
         "--objective-weights",
