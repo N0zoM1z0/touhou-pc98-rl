@@ -38,17 +38,23 @@ deaths.  A completion-gated Stage 1 Lunatic curriculum subsequently produces
 short-phase no-miss clears.  Moving the start from phase 3 to phase 2 and
 fine-tuning for 32,768 transitions improves held-out completion from six to
 eight of eight and reduces deaths from 19 to 14, but yields no no-miss clear.
-No full-stage run clears.  A subsequent control audit finds that one-shot
+A later 7,000-step full-stage diagnostic obtains two ordinary clears in four
+attempts but no no-miss clear.  A subsequent control audit finds that one-shot
 memory input is timing-racy; transactional action refresh and a 1-ms native
 deathbomb guard cancel three otherwise fatal collisions, after which a fourth
 collision exhausts the available safety resource.  Additional shield-aware PPO
 and success-only distillation both fail held-out tests.  In contrast, a frozen
 behavior-policy update using successful and failed trajectories improves phase
 2--4 held-out no-miss clears from 6/8 to 7/8 and observed deaths from two to
-zero while changing only the actor head.  The complete one-thread online
-decision path has 1.530 ms p99 latency, 4.25\% of its 36-ms interval.  No
-full-stage run clears.  We document negative results, validity threats, and a
-path toward a common TH01--05 framework.
+zero while changing only the actor head.  An action-conditioned future-safety
+teacher then improves pre-boss held-out no-miss clears from 0/8 to 2/8 and
+misses from nine to seven; it is removed after distilling the online actor
+head.  On the full stage, the same student increases held-out completion from
+4/8 to 7/8, but both policies remain at zero no-miss clears and student misses
+increase from 12 to 13.  The complete one-thread online decision path has
+1.474 ms p99 latency, 4.09\% of its 36-ms interval.  No full-stage no-miss
+clear has yet been observed.  We document negative results, validity threats,
+and a path toward a common TH01--05 framework.
 \end{abstract}
 
 \section{Research questions}
@@ -91,7 +97,8 @@ clear.  RQ6 is deliberately deferred until the agent can complete TH05 on its
 highest difficulty; only TH05 is currently validated.  The transactional actor,
 native guard, outcome-conditioned offline update, and latency audit provide
 preliminary evidence for RQ7.  Success-only distillation is rejected; a larger
-teacher remains untested.
+future-safety teacher improves the held-out pre-boss point estimate but remains
+insufficient for a no-miss full-stage clear.
 
 \section{Background and related work}
 
@@ -828,11 +835,106 @@ or statistically settled effect.  An audit found that the selection tool had
 previously ranked ordinary completion before no-miss completion; the order and
 a regression test are now corrected.
 
+Moving the boundary earlier changes the conclusion.  On the Stage 1 phase
+1--4 task, the frozen source obtains 8/8 held-out no-miss clears whereas the
+same outcome update obtains only 5/8, one miss, and two no-death timeouts.  We
+reject that update.  A 7,000-step diagnostic from the actual beginning of Stage
+1 then obtains two ordinary clears in four attempts but no no-miss clear and
+six misses.  Five of those six misses occur before a boss phase is active.
+Isolating the pre-boss phase 0--1 segment confirms the boundary: the source
+completes all eight attempts but only two without a miss.
+
+We therefore train a more local offline teacher without adding it to the
+online path.  From 24 frozen-policy pre-boss trajectories, let $e_t$ denote an
+exact native collision preemption or an observed miss.  For horizons
+$h\in\{8,24,64\}$, the training-only action-conditioned risk head predicts
+
+\begin{equation}
+  y_{t,h}=\mathbb{1}\!\left[\exists k\in\{1,\ldots,h\}:e_{t+k}=1\right].
+\end{equation}
+
+The current preempted action is excluded, unfinished suffixes are censored,
+and terminal safe suffixes remain valid negatives.  Balanced binary
+cross-entropy processes 290,988 valid labels, including 10,522 positives.  At
+epoch 5, mean predicted probability is 0.513 on positive labels and 0.442 on
+negative labels.  The teacher evaluates all 19 actions offline and forms a
+risk-adjusted distribution from behavior logits minus three times predicted
+64-step risk.  Only the actor head is distilled toward that distribution, with
+a behavior-policy KL anchor of 0.5; the selected epoch changes behavior KL by
+approximately $3\times10^{-4}$.
+
+\begin{table}[ht]
+  \centering
+  \caption{Pre-boss future-safety distillation.  Misses are totals and every
+  episode completes the phase 0--1 segment.}
+  \label{tab:preboss-risk}
+  \begin{tabular}{lrrrrrr}
+    \toprule
+    & \multicolumn{3}{c}{Selection 1451--1454} &
+      \multicolumn{3}{c}{Held-out 1461--1468} \\
+    System & Clear & No-miss & Misses & Clear & No-miss & Misses \\
+    \midrule
+    Frozen source & 4/4 & 2/4 & 2 & 8/8 & 0/8 & 9 \\
+    Distilled actor, epoch 4 & 4/4 & \textbf{3/4} & \textbf{1} &
+      8/8 & \textbf{2/8} & \textbf{7} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Table~\ref{tab:preboss-risk} is a directionally positive held-out result, not a
+causal action-risk estimate.  The teacher observes only behavior actions and
+then extrapolates to alternatives; the small probability separation and sample
+count make counterfactual emulator branching the appropriate next test.  A
+negative hard-safety control also matters: replacing the audited H6 mask's
+empty-intersection fail-open behavior with a latest-predicted-collision fallback
+produces 0/4 no-miss clears versus 2/4 for the unchanged mask.  H10 and H16
+variants tie the baseline's 2/4 no-miss count but constrain more actions and
+have lower return lower-confidence bounds.  We reject all three fallback
+variants.
+
+The deployment exporter retains only recurrent model weights, runtime
+arguments, and provenance.  It removes the optimizer, the future-safety head,
+and trajectory paths, reducing the checkpoint from 939,122 to about 742,600
+bytes.  Thus the richer learner changes the online actor weights but not its
+architecture or decision-time computation.
+
+The full-stage result separates completion from survival.  Table~\ref{tab:full-risk}
+uses a 7,000-step limit and the same explicit runtime safety configuration for
+both checkpoints.  An earlier attempted comparison inherited different
+deathbomb settings from checkpoint metadata; it was terminated and excluded,
+and the selector now rejects such mismatches unless the comparison is marked as
+an intentional runtime ablation.
+
+\begin{table}[ht]
+  \centering
+  \caption{Complete Stage 1 Lunatic future-safety evaluation.  Misses are
+  totals; no condition obtains a no-miss clear.}
+  \label{tab:full-risk}
+  \begin{tabular}{lrrrrrr}
+    \toprule
+    & \multicolumn{3}{c}{Selection 1491--1494} &
+      \multicolumn{3}{c}{Held-out 1501--1508} \\
+    System & Clear & No-miss & Misses & Clear & No-miss & Misses \\
+    \midrule
+    Frozen source & 2/4 & 0/4 & 7 & 4/8 & 0/8 & \textbf{12} \\
+    Distilled actor & 2/4 & 0/4 & \textbf{5} & \textbf{7/8} & 0/8 & 13 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The 4/8 to 7/8 held-out completion gain is useful for moving a curriculum
+boundary, but it is not progress on the declared perfect-clear metric: both
+systems remain at 0/8 no-miss and the student's total misses increase by one.
+Longer completed trajectories also change exposure to late patterns, so raw
+miss totals and completion must both remain visible.  We retain this actor as a
+completion initializer and reject the observational teacher as a sufficient
+survival-credit solution.
+
 Finally, we benchmark the selected student's complete decision path on one CPU
 thread using a paused live-game state, 500 warm-up decisions, and 5,000 measured
 decisions.  Table~\ref{tab:online-latency} includes the audited masks, recurrent
-forward pass, and categorical sampling.  The 1.530-ms complete-path p99 consumes
-4.25\% of the 36-ms interval.  In the transactional harness, inference occurs
+forward pass, and categorical sampling.  The 1.474-ms complete-path p99 consumes
+4.09\% of the 36-ms interval.  In the transactional harness, inference occurs
 while the emulator is paused, so even a tail outlier cannot advance hidden game
 time; the benchmark additionally shows sufficient headroom for an unpaused
 deployment.
@@ -845,34 +947,42 @@ deployment.
     \toprule
     Component & Mean & p50 & p95 & p99 & Max \\
     \midrule
-    Native/audited shields & 0.034 & 0.034 & 0.038 & 0.049 & 0.067 \\
-    Policy and sampling & 1.341 & 1.333 & 1.446 & 1.494 & 2.837 \\
-    Complete decision & 1.376 & 1.367 & 1.481 & 1.530 & 2.870 \\
+    Native/audited shields & 0.035 & 0.034 & 0.038 & 0.050 & 0.073 \\
+    Policy and sampling & 1.344 & 1.341 & 1.385 & 1.440 & 2.787 \\
+    Complete decision & 1.379 & 1.376 & 1.421 & 1.474 & 2.830 \\
     \bottomrule
   \end{tabular}
 \end{table}
 
 Exact datasets, seeds, checksums, negative controls, and latency quantiles are
-recorded in
-\path{experiments/2026-08-22-th05-lunatic-offline-online.json}.
+recorded in two machine-readable files:
+\begin{itemize}
+  \item \path{experiments/2026-08-22-th05-lunatic-offline-online.json};
+  \item \path{experiments/2026-08-22-th05-lunatic-stage-boundary.json}.
+\end{itemize}
 
 \section{Threats to validity}
 
 \begin{itemize}
-  \item The full-stage paired test has only four stochastic seeds; each
-  short-phase test has eight.  Standard errors remain material, and no
-  full-stage clear occurs.
+  \item The full-stage selection comparison has four stochastic seeds and its
+  held-out comparison has eight.  Standard errors remain material, and no
+  full-stage no-miss clear occurs.
   \item Evaluation seeds control action sampling, but the native game does not
   yet expose a separately controlled environment RNG seed.
   \item The outcome-conditioned update uses only 32 behavior-policy episodes
   and assigns one utility to every attributable movement in an episode.  Its
   7/8 versus 6/8 held-out no-miss result is a promising pilot, not resolved
   long-horizon causal credit or a confidence-bounded improvement claim.
+  \item The future-safety head receives 24 behavior-policy trajectories and
+  only factual chosen-action outcomes.  Evaluating its score on all 19 actions
+  is observational extrapolation, not counterfactual supervision; 2/8 versus
+  0/8 pre-boss held-out no-miss clears remain an underpowered point estimate.
   \item The comparison model has no reproducible compatible checkpoint, so
   systems comparisons do not imply a gameplay win over prior work.
-  \item Learning evidence is limited to TH05 Stage 2 full-stage training and
-  privileged Stage 1 phase 2--4 tasks.  It does not establish transfer to the
-  start of the stage, lower resources, other characters or ranks, or TH01--04.
+  \item Learning evidence now includes the start of TH05 Stage 1 at low power
+  and complete Stage 1 evaluation, but training remains segmented and uses one
+  character and rank.  It does not establish full-stage no-miss mastery, later
+  stages, other characters or ranks, or TH01--04.
   \item The compact observation drops most hazards beyond the nearest 16 in
   each category and currently omits a compact normal-enemy set.
   \item Host timing is measured while unrelated jobs are present.  CPU affinity
@@ -949,10 +1059,20 @@ distillation.
 The success-only student is rejected because its 4/4 selection result falls to
 the source's 6/8 no-miss rate on held-out seeds.  A positive-and-negative
 outcome update provisionally passes: it moves held-out no-miss clears from 6/8
-to 7/8, removes two observed deaths, and retains a 1.530-ms complete-path p99.
+to 7/8 and removes two observed deaths without changing the online architecture.
 H7 is therefore supported as an architectural separation and remains open as a
-learning hypothesis.  The next test moves the phase boundary earlier; a larger
-teacher is justified only if this conservative actor update stops improving.
+learning hypothesis.  At the earlier pre-boss boundary, the observational
+future-safety teacher moves held-out no-miss clears from 0/8 to 2/8 and misses
+from nine to seven.  On the complete stage it increases held-out clears from
+4/8 to 7/8, but both systems obtain zero no-miss clears and student misses rise
+from 12 to 13.  Its exported online path remains small at 1.474-ms p99.  The
+next teacher should use paused emulator-state branching offline: restore one
+audited high-risk state, try each legal action
+under matched short continuations, label collision time or survival, and
+distill the resulting action-contrastive distribution.  The branch evaluator,
+save states, and risk model remain absent from deployment.  This experiment is
+rejected unless its advantage survives both actor distillation and untouched
+full-stage seeds.
 
 \paragraph{H8: old-five-games interface.}
 Define per-game contracts for observation schema, action meaning, terminal
@@ -976,10 +1096,16 @@ resources are exhausted.  Shield-aware PPO and success-only distillation fail
 their held-out tests.  A conservative offline update using positive and
 negative episode outcomes then improves phase 2--4 held-out no-miss clears from
 6/8 to 7/8 and deaths from two to zero while leaving the online architecture
-unchanged; its complete decision p99 is 1.530 ms on one CPU thread.  This is
-preliminary short-phase progress, not mastery.  The main scientific task is to
-move the curriculum boundary toward the full stage and convert the systems
-baseline into a pre-registered multi-configuration study.
+unchanged.  At the true Stage 1 start, a training-only future-safety teacher
+distilled into the actor improves held-out pre-boss no-miss clears from 0/8 to
+2/8 and complete-stage clears from 4/8 to 7/8.  It does not solve survival:
+both full-stage policies have zero no-miss clears and student misses increase
+from 12 to 13.  The exported 180,456-parameter actor contains neither optimizer
+nor risk head and its complete decision p99 is 1.474 ms on one CPU thread.
+This is evidence for the offline/online boundary and curriculum completion,
+not mastery.  The main scientific task is now action-contrastive offline
+supervision under untouched full-stage evaluation, followed by the omitted
+normal-enemy observation and eventually TH01--04 adapters.
 
 \bibliographystyle{plain}
 \bibliography{references}

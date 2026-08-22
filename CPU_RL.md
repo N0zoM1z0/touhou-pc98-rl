@@ -440,28 +440,45 @@ it also proves that safety cannot replace a movement policy that reaches four
 fatal states. The event record is
 `experiments/2026-08-22-th05-lunatic-realtime-deathbomb.json`.
 
-The intended next architecture is therefore asymmetric: use expensive replay
-search, action-contrastive risk, or a larger sequence teacher offline while the
-games are paused, then distill its action distribution into the small recurrent
-online actor. Deployment acceptance must include no-miss completion and measured
-inference/control latency; raw argmax is already a failed distillation rule.
+### Offline future safety and the deployment boundary
+
+The asymmetric architecture is now implemented. A training-only risk head uses
+24 frozen-policy pre-boss trajectories and predicts native collision-preemption
+or miss events at 8-, 24-, and 64-step horizons. It evaluates all 19 actions
+offline, forms a risk-adjusted target distribution, and distills only the actor
+head. The deployment exporter removes that risk head, optimizer state, and
+trajectory paths; the resulting 180,456-parameter online actor is about 742 kB.
+
+On untouched pre-boss seeds, this future-safety actor improves no-miss clears
+from 0/8 to 2/8 and reduces misses from nine to seven. On untouched complete
+Stage 1 seeds, it improves ordinary completion from 4/8 to 7/8, but both systems
+remain at 0/8 no-miss and the student's total misses increase from 12 to 13.
+The actor is therefore useful as a curriculum-completion initializer, not yet a
+perfect-survival solution. A latest-predicted-collision safety fallback and
+longer H10/H16 masks also fail selection and are rejected.
+
+The complete online path---native shields, recurrent actor, and categorical
+sampling---has 1.474 ms p99 latency on one CPU thread, or 4.09% of the 36-ms
+transaction interval. The emulator is paused during inference, so offline
+teacher complexity cannot consume native game time. Full values and hashes are
+in `experiments/2026-08-22-th05-lunatic-stage-boundary.json`.
 
 ## Next experiments
 
 The highest-value next work is:
 
-1. Attribute the fourth fatal trajectory by hazard class and build an offline
-   action-contrastive teacher; distill it into the small deadline-bounded actor.
-2. Audit special-projectile collision boxes before widening any predictive mask.
-3. Synchronize each environment step to an observed native-frame advance, then
+1. Branch from paused emulator save states near audited high-risk decisions,
+   evaluate every legal action under matched short continuations, and distill
+   the resulting action-contrastive collision-time labels into the unchanged
+   deadline-bounded actor.
+2. Add compact normal-enemy tokens as a separately ablated information change;
+   do not confound it with the counterfactual-supervision experiment.
+3. Audit special-projectile collision boxes before widening any predictive mask.
+4. Synchronize each environment step to an observed native-frame advance, then
    implement a reset-aware sequence-block collector and verify its on-policy
    age bound before using its throughput result in algorithm comparisons.
-4. Add enemy tokens and evaluate the implemented time-to-collision features;
-   the current 273-float schema
-   includes nearest bullets/special projectiles but not a compact enemy set.
-5. Expand backward from Stage 1 phase 2 only after a held-out no-miss clear,
-   then reduce starting power/resources and advance to full-stage/full-game
-   completion.
+5. Continue Stage 1 from its true low-power start, requiring held-out no-miss
+   completion rather than ordinary completion before advancing to later stages.
 6. Implement TH01-04 adapters behind the same Gymnasium interface and add
    per-game contract tests before claiming full old-five-games support.
 

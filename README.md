@@ -15,13 +15,19 @@ training/evaluation path is designed around reproducible CPU experiments.
 - Exact child-process attachment with current DOSBox-X PC-98 emulation.
 - A Gymnasium environment with independent 21 MiB image copies per worker.
 - A 273-float compact observation path that skips dense spatial-map allocation.
-- A 180,136-parameter entity-set encoder, GRU policy, and three-value critic.
+- A roughly 180k-parameter entity-set encoder, GRU policy, and three-value
+  critic.
 - Recurrent PPO with vector GAE, value clipping, KL stopping, snapshots, and
   multi-seed lower-confidence-bound checkpoint selection.
 - Optional analytic relative-motion features and adapter-certified hard action
   masks applied consistently during rollout and optimization.
 - Resident-counter miss events, an explicit miss-only training cost, and an
   experimental policy-accounted emergency-bomb mask.
+- A transactional 36-ms action path, 1-ms native deathbomb guard, and measured
+  one-thread online p99 decision latency below 1.6 ms.
+- Offline outcome and future-safety teachers that update only the actor head,
+  plus an inference-only exporter that removes optimizer and auxiliary-head
+  state from deployment artifacts.
 - Eight-emulator CPU rollout at about 223 transitions/s on this host.
 
 TH01-04 are explicitly not claimed yet. The immediate target is TH05 Lunatic
@@ -53,6 +59,19 @@ CUDA_VISIBLE_DEVICES='' nice -n 10 taskset -c 0-47 \
 
 The environment discovers the repository-local DOSBox-X build automatically.
 Set `PC98RL_DOSBOX_X=/absolute/path/to/dosbox-x` to select another build.
+
+Exporting an offline-trained checkpoint makes the deployment boundary explicit:
+
+```bash
+uv run python scripts/export_online_actor.py \
+  --checkpoint models/distill/training-checkpoint.pt \
+  --output models/deploy/online-actor.pt \
+  --regular-bullet-safety-horizon 6 \
+  --no-regular-bullet-least-risk-fallback
+```
+
+The exported file retains the small recurrent policy and audit metadata, but
+contains no optimizer, training-only risk head, or trajectory path list.
 
 See [CPU_RL.md](CPU_RL.md) for the full setup, benchmark methodology, honest
 short-run results, evaluation commands, known failure modes, and next research
