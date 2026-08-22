@@ -18,6 +18,19 @@ class EvaluationSummaryTest(unittest.TestCase):
         }
         self.assertGreater(candidate_rank(perfect), candidate_rank(higher_return))
 
+    def test_checkpoint_rank_prefers_more_no_miss_over_more_raw_clears(self):
+        safer = {
+            "successes": 7,
+            "no_miss_successes": 7,
+            "selection_score": 0.0,
+        }
+        less_safe = {
+            "successes": 8,
+            "no_miss_successes": 6,
+            "selection_score": 10.0,
+        }
+        self.assertGreater(candidate_rank(safer), candidate_rank(less_safe))
+
     def test_summary_preserves_vector_objectives(self):
         summary = summarize(
             [

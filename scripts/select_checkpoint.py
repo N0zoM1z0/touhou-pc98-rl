@@ -45,10 +45,10 @@ def _evaluate_task(task: tuple) -> tuple[str, dict]:
 
 
 def candidate_rank(candidate: dict) -> tuple[int, int, float]:
-    """Order policies by completion, perfect completion, then stable return."""
+    """Order policies by perfect completion, any completion, then stable return."""
     return (
-        int(candidate["successes"]),
         int(candidate["no_miss_successes"]),
+        int(candidate["successes"]),
         float(candidate["selection_score"]),
     )
 
@@ -144,8 +144,8 @@ def main() -> None:
         }
         candidates.append(candidate)
 
-    # Completion is primary. Among equal completion counts, prefer no-miss
-    # completions before using lower-confidence-bound return as the tie-breaker.
+    # A no-miss clear is the primary deployment objective. Ordinary completion
+    # and lower-confidence-bound return only break ties between perfect clears.
     best = max(candidates, key=candidate_rank)
     report = {
         "seeds": args.seeds,
