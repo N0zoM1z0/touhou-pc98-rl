@@ -28,6 +28,8 @@ training/evaluation path is designed around reproducible CPU experiments.
 - Offline outcome and future-safety teachers that update only the actor head,
   plus an inference-only exporter that removes optimizer and auxiliary-head
   state from deployment artifacts.
+- An offline-only DOSBox-X save-state brancher with exact guest-frame stepping;
+  repeated action sequences reproduce compact and raw game state byte-for-byte.
 - Eight-emulator CPU rollout at about 223 transitions/s on this host.
 
 TH01-04 are explicitly not claimed yet. The immediate target is TH05 Lunatic

@@ -463,6 +463,25 @@ transaction interval. The emulator is paused during inference, so offline
 teacher complexity cannot consume native game time. Full values and hashes are
 in `experiments/2026-08-22-th05-lunatic-stage-boundary.json`.
 
+### Exact offline counterfactual replay
+
+The first save-state brancher probe now passes. DOSBox-X receives a private save
+file per emulator, the controller targets the exact process's X11 window under
+Xvfb, and MAIN.EXE's live `_stage_frame` counter replaces the resident run
+statistic that had incorrectly reported zero in earlier progress diagnostics.
+Offline steps stop after an exact number of guest frames rather than a noisy
+wall-clock delay.
+
+From one pre-boss anchor, saving and loading reproduces both the 273-float
+observation and serialized raw game state exactly. Repeating action 10 for eight
+decisions of two native frames yields the identical frame sequence and SHA-256
+digests, with zero maximum observation error. Replaying action 11 from the same
+anchor changes raw state and produces a 0.375 maximum observation difference.
+This establishes a trustworthy counterfactual data substrate, not a gameplay
+gain: the probe is early and safe, and no collision-time teacher has yet been
+trained. The record is
+`experiments/2026-08-22-th05-savestate-branching-probe.json`.
+
 ## Next experiments
 
 The highest-value next work is:

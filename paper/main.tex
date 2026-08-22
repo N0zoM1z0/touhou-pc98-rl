@@ -898,6 +898,20 @@ and trajectory paths, reducing the checkpoint from 939,122 to about 742,600
 bytes.  Thus the richer learner changes the online actor weights but not its
 architecture or decision-time computation.
 
+We also implement the substrate for the next, counterfactual teacher.  Each
+offline emulator receives a private DOSBox-X save file and is controlled through
+the X11 window belonging to its exact PID under Xvfb.  MAIN.EXE's live
+\texttt{\_stage\_frame} counter is used to stop after an exact number of guest
+frames; the resident run-statistic previously exposed under that name remained
+zero during play and is corrected.  In an early pre-boss probe, restoring an
+anchor reproduces the 273-float observation and serialized raw game state
+exactly.  Repeating one action for eight two-frame decisions reproduces every
+intermediate frame number and both final SHA-256 digests, with zero maximum
+observation error.  A contrasting horizontal action changes raw state and the
+observation by up to 0.375.  This validates deterministic branching, not a
+survival improvement; high-risk collision labels and distillation remain to be
+tested.
+
 The full-stage result separates completion from survival.  Table~\ref{tab:full-risk}
 uses a 7,000-step limit and the same explicit runtime safety configuration for
 both checkpoints.  An earlier attempted comparison inherited different
@@ -955,10 +969,11 @@ deployment.
 \end{table}
 
 Exact datasets, seeds, checksums, negative controls, and latency quantiles are
-recorded in two machine-readable files:
+recorded in three machine-readable files:
 \begin{itemize}
   \item \path{experiments/2026-08-22-th05-lunatic-offline-online.json};
-  \item \path{experiments/2026-08-22-th05-lunatic-stage-boundary.json}.
+  \item \path{experiments/2026-08-22-th05-lunatic-stage-boundary.json};
+  \item \path{experiments/2026-08-22-th05-savestate-branching-probe.json}.
 \end{itemize}
 
 \section{Threats to validity}
@@ -977,6 +992,9 @@ recorded in two machine-readable files:
   only factual chosen-action outcomes.  Evaluating its score on all 19 actions
   is observational extrapolation, not counterfactual supervision; 2/8 versus
   0/8 pre-boss held-out no-miss clears remain an underpowered point estimate.
+  \item Exact save-state replay is so far verified at one early, safe pre-boss
+  anchor.  It does not establish that branching near a collision remains exact
+  or that its labels improve a distilled actor.
   \item The comparison model has no reproducible compatible checkpoint, so
   systems comparisons do not imply a gameplay win over prior work.
   \item Learning evidence now includes the start of TH05 Stage 1 at low power
@@ -1066,9 +1084,10 @@ future-safety teacher moves held-out no-miss clears from 0/8 to 2/8 and misses
 from nine to seven.  On the complete stage it increases held-out clears from
 4/8 to 7/8, but both systems obtain zero no-miss clears and student misses rise
 from 12 to 13.  Its exported online path remains small at 1.474-ms p99.  The
-next teacher should use paused emulator-state branching offline: restore one
-audited high-risk state, try each legal action
-under matched short continuations, label collision time or survival, and
+deterministic save-state substrate is now implemented and passes an early-state
+byte-exact replay probe.  The next teacher should restore audited high-risk
+states, try each legal action under matched short continuations, label collision
+time or survival, and
 distill the resulting action-contrastive distribution.  The branch evaluator,
 save states, and risk model remain absent from deployment.  This experiment is
 rejected unless its advantage survives both actor distillation and untouched
@@ -1103,7 +1122,9 @@ both full-stage policies have zero no-miss clears and student misses increase
 from 12 to 13.  The exported 180,456-parameter actor contains neither optimizer
 nor risk head and its complete decision p99 is 1.474 ms on one CPU thread.
 This is evidence for the offline/online boundary and curriculum completion,
-not mastery.  The main scientific task is now action-contrastive offline
+not mastery.  Byte-exact save-state replay makes the next counterfactual data
+experiment operational without changing deployment.  The main scientific task
+is now action-contrastive offline
 supervision under untouched full-stage evaluation, followed by the omitted
 normal-enemy observation and eventually TH01--04 adapters.
 
