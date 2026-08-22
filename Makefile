@@ -8,6 +8,7 @@ native:
 
 paper:
 	cd paper && latexmk -pdf -interaction=nonstopmode -halt-on-error -outdir=build main.tex
+	cp paper/build/main.pdf paper/main.pdf
 
 test:
 	cargo test --lib

@@ -33,16 +33,18 @@ median latency of 0.516 ms, compared with 3.550 ms for the dense-map path, while
 reducing transferred floats by a factor of 776.  Eight emulators deliver about
 223 transitions/s on the tested host.  After 16,384 training transitions and
 validation-based checkpoint selection, an untouched four-seed, 900-step paired
-test improves mean scalar return from 0.0529 to 0.3639, halves observed deaths
-from four to two, and reduces mean resource cost by 17.4\%.  No evaluated run
-clears the stage; these results show preliminary short-horizon improvement, not
-convergence.  We document negative results, validity threats, and a path from
-the current TH05 adapter toward a common TH01--05 research framework.
+test improves mean scalar return from 0.0529 to 0.3639 and halves observed
+deaths.  A completion-gated Stage 1 Lunatic curriculum subsequently produces
+short-phase no-miss clears.  Moving the start from phase 3 to phase 2 and
+fine-tuning for 32,768 transitions improves held-out completion from six to
+eight of eight and reduces deaths from 19 to 14, but yields no no-miss clear.
+No full-stage run clears.  We document negative results, validity threats, and
+a path from the current TH05 adapter toward a common TH01--05 framework.
 \end{abstract}
 
 \section{Research questions}
 
-This project is organized around five falsifiable research questions.
+This project is organized around six falsifiable research questions.
 
 \begin{description}
   \item[RQ1: Systems feasibility.] Can an unmodified emulator plus structured
@@ -59,15 +61,20 @@ This project is organized around five falsifiable research questions.
   \item[RQ4: Safe exploration.] Do adapter-certified hard action constraints
   improve sample efficiency without merely hiding an unsafe policy?
 
-  \item[RQ5: Generality.] Which interfaces can be shared by Touhou 1--5, and
+  \item[RQ5: Sparse survival credit.] Can training-only auxiliary targets spread
+  a rare miss signal backward in time without sacrificing task completion or
+  injecting a scripted dodge policy?
+
+  \item[RQ6: Generality.] Which interfaces can be shared by Touhou 1--5, and
   which memory, termination, reward, and patching components must remain
   game-specific?
 \end{description}
 
 The present evidence addresses RQ1 strongly, RQ2 at the systems level, and RQ3
-only preliminarily.  RQ4 is now implemented as an experimental ablation but has
-no comparative result yet.  RQ5 is deliberately deferred until the agent can
-complete TH05 on its highest difficulty; only TH05 is currently validated.
+only preliminarily.  RQ4 has an underpowered comparative result.  RQ5 is
+motivated by the observed completion/no-miss gap but not yet tested.  RQ6 is
+deliberately deferred until the agent can complete TH05 on its highest
+difficulty; only TH05 is currently validated.
 
 \section{Background and related work}
 
@@ -500,6 +507,42 @@ asynchronous, sequence-aware collector rather than additional learner threads.
 Exact results are in
 \path{experiments/2026-08-22-th05-lunatic-curriculum.json}.
 
+We next froze that checkpoint and evaluated transfer to the longer phase 2--4
+task.  It clears seven of eight episodes versus six for a matched untrained
+policy, with 16 versus 19 deaths, but neither condition clears without a miss.
+The paired return gain is 0.566 with standard error 0.639, so this transfer
+comparison is inconclusive.
+
+For a clean curriculum transition, weights were loaded while Adam moments,
+learning rate, update counters, and recurrent state were reset.  A 32,768-step
+default-PPO run produced four snapshots.  Validation seeds 301--304 select
+update 4 by the predeclared clear/no-miss/return-LCB ordering.  Although update
+16 has higher mean return (2.514 versus 2.373), its higher uncertainty gives a
+lower one-standard-error LCB (2.333 versus 2.347).
+
+\begin{table}[ht]
+  \centering
+  \caption{Untouched Stage 1 Lunatic phase 2--4 fine-tuning test, eight
+  stochastic episodes per row.}
+  \label{tab:phase-two}
+  \begin{tabular}{lrrrr}
+    \toprule
+    Policy & Clears & No-miss & Deaths & Mean return \\
+    \midrule
+    Frozen phase 3--4 initializer & 6 & 0 & 19 & 1.739 \\
+    Phase 2--4 fine-tuned PPO & \textbf{8} & 0 & \textbf{14} & \textbf{2.609} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Table~\ref{tab:phase-two} uses untouched seeds 311--318.  Fine-tuning gains
+0.870 paired return with standard error 0.464.  This is evidence for improved
+completion, not no-miss mastery: every episode still contains at least one
+death.  Curriculum therefore made completion feedback dense but did not solve
+survival credit assignment.  Exact records are in
+\path{experiments/2026-08-22-th05-lunatic-p2-curriculum.json} and its linked raw
+selection and paired reports.
+
 \section{Threats to validity}
 
 \begin{itemize}
@@ -510,9 +553,9 @@ Exact results are in
   yet expose a separately controlled environment RNG seed.
   \item The comparison model has no reproducible compatible checkpoint, so
   systems comparisons do not imply a gameplay win over prior work.
-  \item Learning evidence is limited to TH05 Stage 2 full-stage training and a
-  privileged Stage 1 phase 3--4 task.  Neither establishes transfer to earlier
-  phases, lower starting resources, other characters or ranks, or TH01--04.
+  \item Learning evidence is limited to TH05 Stage 2 full-stage training and
+  privileged Stage 1 phase 2--4 tasks.  It does not establish transfer to the
+  start of the stage, lower resources, other characters or ranks, or TH01--04.
   \item The compact observation drops most hazards beyond the nearest 16 in
   each category and currently omits a compact normal-enemy set.
   \item Host timing is measured while unrelated jobs are present.  CPU affinity
@@ -542,17 +585,25 @@ When terminals become common, replace global synchronous waiting with an
 asynchronous collector or reset pool.  The prediction is improved wall-clock
 throughput without changing the on-policy age bound.
 
-\paragraph{H4: risk-aware objectives.}
+\paragraph{H4: sparse-miss auxiliary credit.}
+For each on-policy transition, predict whether a miss occurs within 15 and 30
+future actions.  Mask samples whose horizon crosses an unfinished rollout
+boundary, stop gradients through labels, and expose no future information at
+inference.  Compare PPO and PPO plus the shared-encoder auxiliary loss at
+matched transitions.  The hypothesis is rejected if no-miss completion does
+not improve or ordinary completion regresses.
+
+\paragraph{H5: risk-aware objectives.}
 Compare the fixed scalarization with constrained or distributional survival
 objectives.  Any method must report the full reward vector and may not hide a
 survival regression behind score gain.
 
-\paragraph{H5: adapter-certified safety.}
+\paragraph{H6: adapter-certified safety.}
 Compare no mask, exact resource/boundary constraints, and any future predictive
 shield at matched training budgets.  Report removed policy probability mass
 and evaluate every trained policy both with and without its shield.
 
-\paragraph{H6: old-five-games interface.}
+\paragraph{H7: old-five-games interface.}
 Define per-game contracts for observation schema, action meaning, terminal
 flags, executable identity, and reset.  TH01--04 enter the benchmark only after
 live parser/action tests pass and TH05 mastery has been addressed; shared code
@@ -563,10 +614,12 @@ alone is not evidence of support.
 Native PC-98 RL is practical on a CPU when observation construction, process
 attachment, worker isolation, and thread scheduling are treated as first-class
 research concerns.  The present system removes a large dense-map bottleneck,
-runs eight independent games at useful speed, and exhibits a promising but
-small-data improvement in survival and resource use.  The main scientific task
-now is not to declare success, but to turn this systems baseline into a larger,
-pre-registered multi-configuration study with true stage completion metrics.
+runs eight independent games at useful speed, and exhibits small-data
+improvements in short-phase completion and survival.  The persistent gap
+between completion and no-miss completion motivates an auxiliary-credit
+ablation rather than a claim of mastery.  The main scientific task is to turn
+this systems baseline into a pre-registered multi-configuration study with
+full-stage completion metrics.
 
 \bibliographystyle{plain}
 \bibliography{references}

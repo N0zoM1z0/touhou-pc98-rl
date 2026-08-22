@@ -1,0 +1,98 @@
+{
+  "date": "2026-08-22",
+  "scenario": {
+    "stage": 1,
+    "patch_stage_index": 0,
+    "phase": 2,
+    "end_phase": 4,
+    "rank": 3,
+    "character": 2,
+    "power": 128,
+    "lives": 3,
+    "bombs": 3
+  },
+  "initialization": {
+    "mode": "policy_weights_only",
+    "source": "models/curriculum/th05-s1-lunatic-p3-p4-selected.pt",
+    "source_sha256": "f896280d0ceb6dfbf344af5e5a8d7bd50993d8a77ff60e6472b44669d7ff7108",
+    "optimizer_reset": true,
+    "counters_reset": true
+  },
+  "training": {
+    "seed": 6066,
+    "updates": 16,
+    "workers": 8,
+    "rollout_steps": 256,
+    "transitions": 32768,
+    "learning_rate": 0.0003,
+    "entropy_coefficient": 0.02,
+    "epochs": 3,
+    "successes": 15,
+    "no_miss_successes": 0,
+    "failures": 26,
+    "death_events": 187,
+    "mean_steps_per_s": 129.1944,
+    "wall_s": 314.772
+  },
+  "validation": {
+    "seeds": [301, 302, 303, 304],
+    "steps": 1600,
+    "selection_order": ["successes", "no_miss_successes", "mean_return_minus_one_standard_error"],
+    "candidates": {
+      "update_4": {
+        "sha256": "d8cc0e970bb60467eabd4bf7a85db349382747d2b1d57480c102783cd3b4b217",
+        "successes": 4,
+        "no_miss_successes": 0,
+        "mean_deaths": 2.0,
+        "mean_return": 2.373,
+        "standard_error": 0.025861,
+        "selection_score": 2.347139
+      },
+      "update_8": {
+        "successes": 4,
+        "no_miss_successes": 0,
+        "mean_deaths": 2.0,
+        "mean_return": 2.33125,
+        "standard_error": 0.025833,
+        "selection_score": 2.305417
+      },
+      "update_12": {
+        "successes": 3,
+        "no_miss_successes": 0,
+        "mean_deaths": 2.0,
+        "mean_return": 2.07175,
+        "standard_error": 0.719509,
+        "selection_score": 1.352241
+      },
+      "update_16": {
+        "successes": 4,
+        "no_miss_successes": 0,
+        "mean_deaths": 1.75,
+        "mean_return": 2.513875,
+        "standard_error": 0.180379,
+        "selection_score": 2.333496
+      }
+    },
+    "selected": "update_4"
+  },
+  "frozen_transfer_vs_untrained": {
+    "seeds": [211, 212, 213, 214, 215, 216, 217, 218],
+    "untrained": {"successes": 6, "no_miss_successes": 0, "deaths": 19, "mean_return": 1.747562},
+    "frozen_source": {"successes": 7, "no_miss_successes": 0, "deaths": 16, "mean_return": 2.313937},
+    "paired_return_gain": 0.566375,
+    "paired_standard_error": 0.639005
+  },
+  "fine_tune_test": {
+    "seeds": [311, 312, 313, 314, 315, 316, 317, 318],
+    "frozen_source": {"successes": 6, "no_miss_successes": 0, "deaths": 19, "mean_return": 1.739313},
+    "fine_tuned": {"successes": 8, "no_miss_successes": 0, "deaths": 14, "mean_return": 2.608812},
+    "paired_return_gain": 0.8695,
+    "paired_standard_error": 0.464233
+  },
+  "raw_reports": [
+    "experiments/2026-08-22-th05-lunatic-phase-transfer.json",
+    "experiments/2026-08-22-th05-lunatic-p2-selection.json",
+    "experiments/2026-08-22-th05-lunatic-p2-finetune-test.json"
+  ],
+  "interpretation": "Weights-only fine-tuning improves phase completion and deaths on eight untouched seeds, but neither source nor fine-tuned policy achieves no-miss completion. Sparse survival credit remains unresolved."
+}

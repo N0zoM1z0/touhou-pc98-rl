@@ -38,8 +38,8 @@ checkpoint is available for a controlled head-to-head evaluation.
 
 ## Reproduce the local game image
 
-Required system tools are `bspatch` (`bsdiff` package), `mtools`, `xvfb-run`, a
-Rust toolchain, `uv`, and a locally built recent DOSBox-X. The tested emulator is
+Required system tools are `bspatch` (`bsdiff` package), `mtools`, a Rust
+toolchain, `uv`, and a locally built recent DOSBox-X. The tested emulator is
 official DOSBox-X tag `dosbox-x-v2026.07.02`; its PC-98 mode is documented in the
 [official DOSBox-X PC-98 guide](https://github.com/joncampbell123/dosbox-x/wiki/Guide%3APC%E2%80%9098-emulation-in-DOSBox%E2%80%90X).
 
@@ -84,13 +84,16 @@ cargo test --lib
 uv sync --reinstall-package touhou-pc98-rl
 
 CUDA_VISIBLE_DEVICES='' nice -n 10 taskset -c 0-7 \
-  xvfb-run --auto-servernum uv run python scripts/evaluate_policy.py \
+  uv run python scripts/evaluate_policy.py \
   --image external/th05-rl.hdi --policy random --steps 200 --seed 41
 ```
 
 The environment first uses `PC98RL_DOSBOX_X` when set, then searches `PATH`,
 then checks `external/dosbox-x-install/bin/dosbox-x`. It passes the resolved
-absolute executable to each native child spawn.
+absolute executable to each native child spawn. In a displayless shell the
+native launcher selects SDL's dummy video backend automatically; Xvfb is not a
+runtime requirement. Early emulator exit is reported directly instead of being
+misdiagnosed as a process-memory permission failure.
 
 `ptrace_scope` must allow reading the child DOSBox process. Check it with:
 
@@ -280,19 +283,47 @@ steps/s from the 223 steps/s no-reset rate. This is direct evidence for the
 planned asynchronous sequence-block collector. The full machine-readable record
 is `experiments/2026-08-22-th05-lunatic-curriculum.json`.
 
+### Second curriculum rung and sparse-miss limit
+
+The frozen phase 3-to-4 checkpoint transferred to the unseen phase 2-to-4 task:
+on seeds 211--218 it cleared 7/8 versus 6/8 for a matched untrained policy and
+reduced deaths from 19 to 16, but neither policy achieved a no-miss clear. A new
+weights-only curriculum initializer then loaded the policy while resetting Adam
+moments, learning rate, counters, and recurrent state. Its provenance record
+includes the source checkpoint SHA-256 and scenario.
+
+Default PPO fine-tuning used seed 6066 for 32,768 transitions. Validation over
+updates 4/8/12/16 on seeds 301--304 selected update 4 by the frozen
+clear/no-miss/return-LCB rule. On untouched seeds 311--318, the selected policy
+improved from 6/8 to 8/8 clears, reduced deaths from 19 to 14, and gained
+`+0.870 +/- 0.464` paired return versus its initialization policy. Both remained
+at 0/8 no-miss. The supported conclusion is improved phase completion, not
+perfect play.
+
+This result exposes a different bottleneck: a miss is sparse and only marks the
+collision step even though the responsible movement may begin tens of actions
+earlier. The next ablation will add training-only, multi-horizon future-miss
+prediction to the shared representation. Labels come from the same on-policy
+rollouts, are masked when the horizon is censored, and are never inputs at
+inference. PPO and PPO+auxiliary must use matched transitions and report clears,
+no-miss clears, and deaths; a completion regression falsifies the proposed
+improvement. Exact selection and test reports are under `experiments/` with the
+`th05-lunatic-p2` prefix.
+
 ## Next experiments
 
 The highest-value next work is:
 
-1. Train the verified Stage 1 phase 3-to-4 task to reliable no-miss completion,
-   then move the start phase backward only after a held-out completion gate.
-2. Add enemy tokens and evaluate the implemented time-to-collision features;
+1. Compare matched-budget PPO against multi-horizon future-miss auxiliary
+   prediction on Stage 1 phase 2-to-4; reject it if completion or held-out
+   no-miss performance regresses.
+2. Implement a reset-aware sequence-block collector and verify its on-policy
+   age bound before using its throughput result in algorithm comparisons.
+3. Add enemy tokens and evaluate the implemented time-to-collision features;
    the current 273-float schema
    includes nearest bullets/special projectiles but not a compact enemy set.
-3. Reduce starting power/resources and expand from Stage 1 phases to full-stage
+4. Reduce starting power/resources and expand from Stage 1 phases to full-stage
    and later full-game completion, always measuring completion first.
-4. Decouple reset latency from synchronous rollout collection, or use an
-   asynchronous worker pool once terminal events become frequent.
 5. Implement TH01-04 adapters behind the same Gymnasium interface and add
    per-game contract tests before claiming full old-five-games support.
 
