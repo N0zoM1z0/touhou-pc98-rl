@@ -462,18 +462,57 @@ backward, reduce privileged power/resources, and only then optimize a full
 stage.  The machine-readable record is
 \path{experiments/2026-08-22-th05-lunatic-ablation.json}.
 
+We then trained two geometry-plus-safety PPO pilots on that phase.  Ten retained
+snapshots were ranked on seeds 111--114.  The selected update clears all four
+runs without a miss in three.  Table~\ref{tab:curriculum} reports two disjoint
+eight-seed tests.
+
+\begin{table}[ht]
+  \centering
+  \caption{Stage 1 Lunatic phase 3--4 results.  Each row contains eight
+  stochastic episodes; deaths are totals.}
+  \label{tab:curriculum}
+  \begin{tabular}{lrrrr}
+    \toprule
+    Comparison & Clears & No-miss & Deaths & Mean return \\
+    \midrule
+    Untrained matched policy & 8 & 1 & 7 & 1.661 \\
+    Selected PPO & 8 & \textbf{4} & \textbf{4} & \textbf{1.952} \\
+    \midrule
+    Default PPO update 8 & 8 & \textbf{3} & \textbf{6} & \textbf{1.790} \\
+    Phase-tuned PPO update 8 & 8 & 1 & 7 & 1.697 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Against the untrained policy, selected PPO gains 0.290 mean return with paired
+standard error 0.100 and quadruples no-miss clears.  This is evidence of learned
+safety on the short phase, not merely access to an already easy completion.
+However, the lower-entropy, higher-learning-rate pilot does not replicate its
+four-seed validation advantage: on seeds 131--138 it trails default PPO by
+0.093 return (paired standard error 0.136) and two no-miss clears.  We therefore
+reject any claim that this hyperparameter change is reliably better.
+
+Frequent terminals lower mean collection throughput to 76--80 transitions/s,
+versus 223 without resets; one rollout with twelve successes takes 64.4 s.
+This measured 2.8--2.9-fold slowdown strengthens H3: phase curricula need an
+asynchronous, sequence-aware collector rather than additional learner threads.
+Exact results are in
+\path{experiments/2026-08-22-th05-lunatic-curriculum.json}.
+
 \section{Threats to validity}
 
 \begin{itemize}
-  \item Both paired tests have only four stochastic seeds (900 or 1,200 steps
-  per seed).  Paired standard errors are large and no full-stage clear occurs.
+  \item The full-stage paired test has only four stochastic seeds; each
+  short-phase test has eight.  Standard errors remain material, and no
+  full-stage clear occurs.
   \item Evaluation seeds control action sampling, but the native game does not
   yet expose a separately controlled environment RNG seed.
   \item The comparison model has no reproducible compatible checkpoint, so
   systems comparisons do not imply a gameplay win over prior work.
-  \item Learning evidence comes from one TH05 Stage 2 configuration; the Stage
-  1 result is only a random-policy phase probe.  Neither establishes transfer
-  to other stages, characters, ranks, or TH01--04.
+  \item Learning evidence is limited to TH05 Stage 2 full-stage training and a
+  privileged Stage 1 phase 3--4 task.  Neither establishes transfer to earlier
+  phases, lower starting resources, other characters or ranks, or TH01--04.
   \item The compact observation drops most hazards beyond the nearest 16 in
   each category and currently omits a compact normal-enemy set.
   \item Host timing is measured while unrelated jobs are present.  CPU affinity

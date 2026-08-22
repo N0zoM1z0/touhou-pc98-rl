@@ -1,0 +1,106 @@
+{
+  "date": "2026-08-22",
+  "scenario": {
+    "stage": 1,
+    "patch_stage_index": 0,
+    "phase": 3,
+    "end_phase": 4,
+    "rank": 3,
+    "character": 2,
+    "power": 128,
+    "lives": 3,
+    "bombs": 3
+  },
+  "pilots": {
+    "default": {
+      "seed": 4044,
+      "transitions": 49152,
+      "learning_rate": 0.0003,
+      "entropy_coefficient": 0.02,
+      "epochs": 3,
+      "training_successes": 113,
+      "training_failures": 20,
+      "training_death_events": 372,
+      "mean_steps_per_s": 76.1467,
+      "wall_s": 776.026
+    },
+    "phase_tuned": {
+      "seed": 5055,
+      "transitions": 32768,
+      "learning_rate": 0.0008,
+      "entropy_coefficient": 0.002,
+      "epochs": 6,
+      "training_successes": 77,
+      "training_no_miss_successes": 14,
+      "training_failures": 9,
+      "training_death_events": 215,
+      "mean_steps_per_s": 79.6031,
+      "wall_s": 508.441
+    }
+  },
+  "snapshot_validation": {
+    "seeds": [111, 112, 113, 114],
+    "steps": 800,
+    "candidate_count": 10,
+    "default_update_8": {
+      "successes": 4,
+      "no_miss_successes": 2,
+      "mean_return": 1.89425,
+      "standard_error": 0.176544,
+      "mean_deaths": 0.5
+    },
+    "phase_tuned_update_8": {
+      "successes": 4,
+      "no_miss_successes": 3,
+      "mean_return": 2.03,
+      "standard_error": 0.155016,
+      "mean_deaths": 0.25,
+      "sha256": "f896280d0ceb6dfbf344af5e5a8d7bd50993d8a77ff60e6472b44669d7ff7108"
+    },
+    "selected": "phase_tuned_update_8"
+  },
+  "selected_vs_untrained_test": {
+    "seeds": [121, 122, 123, 124, 125, 126, 127, 128],
+    "steps": 800,
+    "untrained": {
+      "successes": 8,
+      "no_miss_successes": 1,
+      "deaths": 7,
+      "mean_return": 1.661313,
+      "return_standard_error": 0.073301
+    },
+    "selected": {
+      "successes": 8,
+      "no_miss_successes": 4,
+      "deaths": 4,
+      "mean_return": 1.9515,
+      "return_standard_error": 0.132829
+    },
+    "paired_return_gain": 0.290188,
+    "paired_return_gain_standard_error": 0.099934
+  },
+  "hyperparameter_robustness_test": {
+    "seeds": [131, 132, 133, 134, 135, 136, 137, 138],
+    "steps": 800,
+    "default_update_8": {
+      "successes": 8,
+      "no_miss_successes": 3,
+      "mean_return": 1.79,
+      "mean_deaths": 0.75
+    },
+    "phase_tuned_update_8": {
+      "successes": 8,
+      "no_miss_successes": 1,
+      "mean_return": 1.69725,
+      "mean_deaths": 0.875
+    },
+    "phase_tuned_minus_default_return": -0.09275,
+    "paired_standard_error": 0.136443
+  },
+  "systems_observation": {
+    "steady_rollout_steps_per_s": 222.9,
+    "pilot_mean_steps_per_s_range": [76.1467, 79.6031],
+    "cause": "Frequent phase terminals serialize three-second emulator resets in the synchronous collector."
+  },
+  "interpretation": "The short phase converts a zero-clear full-stage problem into a learnable no-miss objective. The validation-selected policy improves no-miss rate over an untrained matched policy on eight untouched seeds. The more aggressive PPO hyperparameters do not beat default PPO on a second eight-seed comparison, so that tuning result is not robust."
+}

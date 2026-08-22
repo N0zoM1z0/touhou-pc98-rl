@@ -258,6 +258,28 @@ with one death. This validates phase success and provides a dense starting task
 for completion-gated curriculum training. Exact values are in
 `experiments/2026-08-22-th05-lunatic-ablation.json`.
 
+### First learned curriculum rung
+
+Two geometry+safety PPO pilots trained the Stage 1 phase 3-to-4 task. Snapshot
+selection over seeds 111--114 chose the phase-tuned update 8 with 4/4 clears,
+3/4 no-miss clears, and 0.25 mean deaths. On untouched seeds 121--128, both the
+selected and matched untrained policies cleared 8/8, but learning improved
+no-miss clears from 1/8 to 4/8, reduced deaths from 7 to 4, and raised mean
+return from 1.661 to 1.952. The paired gain was `+0.290 +/- 0.100` standard
+error.
+
+The entropy/learning-rate tuning itself did **not** replicate. On a second
+held-out set (seeds 131--138), default PPO update 8 achieved 3/8 no-miss clears
+versus 1/8 for the tuned update, with tuned-minus-default return
+`-0.093 +/- 0.136`. The supported conclusion is that phase curriculum enables
+learned safety; four validation seeds are insufficient for robust
+hyperparameter selection.
+
+Frequent phase terminals also reduced mean collection throughput to 76--80
+steps/s from the 223 steps/s no-reset rate. This is direct evidence for the
+planned asynchronous sequence-block collector. The full machine-readable record
+is `experiments/2026-08-22-th05-lunatic-curriculum.json`.
+
 ## Next experiments
 
 The highest-value next work is:
