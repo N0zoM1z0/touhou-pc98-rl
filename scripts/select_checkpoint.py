@@ -18,9 +18,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.evaluate_policy import evaluate
 
 
-def _evaluate_task(task: tuple[str, str, bool, int, int]) -> tuple[str, dict]:
+def _evaluate_task(task: tuple) -> tuple[str, dict]:
     """Evaluate one snapshot/seed pair in an isolated process."""
-    snapshot, image, deterministic, steps, seed = task
+    (
+        snapshot,
+        image,
+        deterministic,
+        steps,
+        seed,
+        regular_bullet_safety_horizon,
+        regular_bullet_safety_margin,
+        deathbomb_safety,
+    ) = task
     result = evaluate(
         image=image,
         policy="checkpoint",
@@ -28,6 +37,9 @@ def _evaluate_task(task: tuple[str, str, bool, int, int]) -> tuple[str, dict]:
         deterministic=deterministic,
         steps=steps,
         seed=seed,
+        regular_bullet_safety_horizon=regular_bullet_safety_horizon,
+        regular_bullet_safety_margin=regular_bullet_safety_margin,
+        deathbomb_safety=deathbomb_safety,
     )
     return snapshot, result
 
@@ -55,6 +67,13 @@ def main() -> None:
     )
     parser.add_argument("--lcb-z", type=float, default=1.0)
     parser.add_argument("--deterministic", action="store_true")
+    parser.add_argument("--regular-bullet-safety-horizon", type=int, default=None)
+    parser.add_argument("--regular-bullet-safety-margin", type=float, default=None)
+    parser.add_argument(
+        "--deathbomb-safety",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+    )
     parser.add_argument("--output", default="models/pc98_entity_ppo_best.pt")
     parser.add_argument("--report", default="runs/pc98rl/checkpoint_selection.json")
     parser.add_argument("--dry-run", action="store_true")
@@ -74,7 +93,16 @@ def main() -> None:
         snapshot: [] for snapshot in snapshot_strings
     }
     tasks = [
-        (snapshot, args.image, args.deterministic, args.steps, seed)
+        (
+            snapshot,
+            args.image,
+            args.deterministic,
+            args.steps,
+            seed,
+            args.regular_bullet_safety_horizon,
+            args.regular_bullet_safety_margin,
+            args.deathbomb_safety,
+        )
         for snapshot in snapshot_strings
         for seed in args.seeds
     ]
@@ -124,6 +152,9 @@ def main() -> None:
         "steps": args.steps,
         "jobs": args.jobs,
         "deterministic": args.deterministic,
+        "regular_bullet_safety_horizon": args.regular_bullet_safety_horizon,
+        "regular_bullet_safety_margin": args.regular_bullet_safety_margin,
+        "deathbomb_safety": args.deathbomb_safety,
         "lcb_z": args.lcb_z,
         "selected": best["snapshot"],
         "candidates": candidates,
