@@ -38,13 +38,17 @@ deaths.  A completion-gated Stage 1 Lunatic curriculum subsequently produces
 short-phase no-miss clears.  Moving the start from phase 3 to phase 2 and
 fine-tuning for 32,768 transitions improves held-out completion from six to
 eight of eight and reduces deaths from 19 to 14, but yields no no-miss clear.
-No full-stage run clears.  We document negative results, validity threats, and
-a path from the current TH05 adapter toward a common TH01--05 framework.
+No full-stage run clears.  A subsequent control audit finds that one-shot
+memory input is timing-racy; transactional action refresh and a 1-ms native
+deathbomb guard cancel three otherwise fatal collisions, after which a fourth
+collision exhausts the available safety resource.  We document negative
+results, validity threats, and a path from the current TH05 adapter toward a
+common TH01--05 framework.
 \end{abstract}
 
 \section{Research questions}
 
-This project is organized around six falsifiable research questions.
+This project is organized around seven falsifiable research questions.
 
 \begin{description}
   \item[RQ1: Systems feasibility.] Can an unmodified emulator plus structured
@@ -68,6 +72,10 @@ This project is organized around six falsifiable research questions.
   \item[RQ6: Generality.] Which interfaces can be shared by Touhou 1--5, and
   which memory, termination, reward, and patching components must remain
   game-specific?
+
+  \item[RQ7: Real-time deployment.] Can a low-latency online actor and exact
+  safety monitor be separated from a more expensive offline learning plane,
+  and can stronger teachers be distilled without losing survival performance?
 \end{description}
 
 The present evidence addresses RQ1 strongly, RQ2 at the systems level, and RQ3
@@ -75,7 +83,9 @@ only preliminarily.  RQ4 has an underpowered comparative result.  An initial
 RQ5 auxiliary mechanism is rejected by a held-out pilot; a subsequent explicit
 miss-cost pilot improves the completion point estimate but produces no no-miss
 clear.  RQ6 is deliberately deferred until the agent can complete TH05 on its
-highest difficulty; only TH05 is currently validated.
+highest difficulty; only TH05 is currently validated.  The transactional actor
+and native guard provide initial systems evidence for RQ7, while teacher
+distillation remains untested.
 
 \section{Background and related work}
 
@@ -124,6 +134,14 @@ means inadequate for the stated experimental setting, not universally wrong.
     Shared host game directory & Concurrent emulators can read and write the
     same configuration and score files & One private HDI copy and exact child
     PID per environment \\
+    One process-memory input write per action & TH05 refreshes its input word
+    from the physical keyboard every native frame; a one-shot bomb is often
+    overwritten before use & Refresh the selected command every 1 ms during a
+    bounded action transaction \\
+    Learner time shares the live game clock & Inference and PPO updates create
+    unobserved game progress and can consume a short deathbomb window & Pause
+    each emulator between transactions; keep the online safety path native and
+    independent of learner latency \\
     Dense $24\times92\times96$ maps every step & Allocation and language-boundary
     transfer dominate CPU inference & 273-float native compact reader \\
     Normalize every objective before weighting & Reward magnitude loses its
@@ -301,6 +319,32 @@ bomb with zero stock and movement into an active boundary clamp.  The masked
 categorical is renormalized identically during rollout and PPO optimization,
 and removed probability mass is logged.  It does not implement scripted
 collision avoidance.
+
+\subsection{Real-time control plane and learning plane}
+
+The deployment path is intentionally smaller than the research learner.  A
+policy chooses one of 19 actions once per 36-ms transaction.  During that
+transaction, the adapter refreshes the command every 1 ms because TH05's native
+keyboard scan otherwise overwrites a single memory write.  The emulator is
+paused before returning the next observation, so model inference, replay
+processing, or a PPO update cannot advance an unobserved game clock.  This
+defines an explicit online control plane even though the present data are still
+collected on-policy.
+
+An even shorter native safety path reads only \texttt{player\_is\_hit} and the
+one-byte miss timer.  During the audited eight-frame cancellation window it
+preempts the policy command with bomb.  Its response time therefore does not
+depend on Python inference.  The resource-reservation mask runs before geometric
+filtering; reversing that order allowed a downstream feasibility fallback to
+spend bombs before a collision.  Interventions are exposed in transition
+metadata rather than silently attributed to the sampled policy.
+
+This boundary also permits a future offline teacher to be more expensive than
+the deployed actor.  Counterfactual replay search, action-contrastive risk, and
+larger sequence models can label stored states; their movement decisions can
+then be distilled into a small recurrent actor.  ``Offline'' here names the
+learning plane, not a claim that the current PPO implementation is an offline-RL
+algorithm.
 
 \section{Experimental protocol}
 
@@ -675,6 +719,35 @@ special-projectile collision rules rather than continuing the same PPO run.
 Machine-readable results are in
 \path{experiments/2026-08-22-th05-lunatic-audited-bullet-safety.json}.
 
+\subsection{Real-time action and deathbomb audit}
+
+A normal-bomb probe exposes a control failure hidden by the earlier directional
+test.  One write of action 18 leaves the stock at three because TH05's keyboard
+refresh replaces the command before \texttt{player\_bomb} observes it.  Repeating
+the same command 142 times over 80 ms consumes exactly one bomb.  We therefore
+replace accumulated wall-clock stepping with a transaction that refreshes the
+command every 1 ms and freezes the emulator while the learner is inactive.
+
+ReC98 source establishes a 32-frame miss animation and an eight-frame
+deathbomb interval: a bomb is accepted while the miss timer is 40 through 33,
+and acceptance clears the pending collision before the resident miss counter
+increments.  The native online guard implements only this audited predicate.
+In a deterministic-policy diagnostic on the phase 2--4 task, it consumes bombs
+at steps 194, 509, and 757; all three pending collisions are cancelled without
+a miss.  A fourth collision begins at step 950 with zero bombs and becomes a
+miss at step 953.  Thus the guard converts all available resources into three
+successful cancellations, but the movement policy still enters four fatal
+trajectories in 1,200 actions.  This is a causal trace under uncontrolled game
+RNG, not a multi-seed performance estimate.  Exact events are recorded in
+\path{experiments/2026-08-22-th05-lunatic-realtime-deathbomb.json}.
+
+The result separates two hypotheses.  Online latency and action delivery were
+real failures and are now corrected.  Perfect play remains unsolved because a
+finite emergency resource cannot compensate for repeated unsafe movement.  The
+next policy experiment must reduce pre-collision risk, preferably using a
+stronger offline teacher or action-contrastive targets distilled into the small
+online actor.
+
 \section{Threats to validity}
 
 \begin{itemize}
@@ -693,10 +766,10 @@ Machine-readable results are in
   \item Host timing is measured while unrelated jobs are present.  CPU affinity
   and niceness reduce interference but do not produce a dedicated-machine
   benchmark.
-  \item API steps are paced by a wall-clock interval rather than synchronized
-  to an observed native-frame transition.  Setting that interval to zero makes
-  the policy loop outrun emulation and cannot be interpreted as additional
-  environment transitions.
+  \item API steps are transactional and the emulator is paused during learner
+  work, but each live interval is still paced by wall clock rather than an
+  observed native-frame counter.  Setting the interval to zero is rejected and
+  cannot be interpreted as additional environment transitions.
 \end{itemize}
 
 \section{Research roadmap}
@@ -752,7 +825,16 @@ and rejected as a sufficient perfect-play solution.  The next registered
 extension must attribute deaths and add only audited special-projectile or
 deathbomb semantics.
 
-\paragraph{H7: old-five-games interface.}
+\paragraph{H7: offline teacher and online actor.}
+Keep the deployed recurrent actor and native safety monitor within the measured
+control deadline.  Permit replay search or a larger sequence teacher only in
+the paused/offline learning plane, then distill action distributions and
+action-contrastive risk into the online actor.  Compare the distilled actor
+against its source policy on held-out no-miss completion, intervention count,
+and inference latency; reject any teacher improvement that disappears after
+distillation.
+
+\paragraph{H8: old-five-games interface.}
 Define per-game contracts for observation schema, action meaning, terminal
 flags, executable identity, and reset.  TH01--04 enter the benchmark only after
 live parser/action tests pass and TH05 mastery has been addressed; shared code
@@ -768,11 +850,13 @@ improvements in short-phase completion and survival.  A future-miss auxiliary
 loss fails a held-out pilot, and an explicit miss cost improves ordinary
 completion without producing a no-miss clear.  An audited regular-bullet mask
 then preserves 8/8 completion and reduces misses from 15 to 14, but again
-produces zero no-miss clears.  The persistent gap motivates hazard attribution,
-special-projectile and deathbomb semantics, and constrained survival learning
-rather than a claim of mastery.  The main scientific task is to turn this systems
-baseline into a pre-registered multi-configuration study with full-stage
-completion metrics.
+produces zero no-miss clears.  Transactional input and a 1-ms online deathbomb
+guard then cancel three consecutive fatal collisions, but a fourth occurs after
+resources are exhausted.  The persistent gap now motivates stronger
+pre-collision movement learned offline and distilled into a deadline-bounded
+online actor, rather than a claim of mastery.  The main scientific task is to
+turn this systems baseline into a pre-registered multi-configuration study with
+full-stage completion metrics.
 
 \bibliographystyle{plain}
 \bibliography{references}

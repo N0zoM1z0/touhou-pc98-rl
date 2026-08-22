@@ -23,6 +23,7 @@ validation. No copyrighted game image or patched executable is tracked by Git.
 | Environment | Custom worker/trainer coupling | Gymnasium `Env` with isolated HDI per instance |
 | Process discovery | First matching DOSBox process | Exact spawned PID, optional explicit PID attach |
 | Model retention | Latest checkpoint | Periodic snapshots plus multi-seed LCB selector |
+| Live control | One timing-racy memory write; learner time advances the game | 36 ms transactions, 1 ms action refresh, paused learner boundary, native deathbomb guard |
 
 The reference column documents the baseline used during design; it is not this
 project's runtime or public interface. The compact reader does not build and discard dense maps. Its live paused-game
@@ -31,7 +32,9 @@ less float transfer. The entity model is 13.2x smaller. On this host, eight
 games produced about 223 transitions/s; collecting 2,048 transitions took about
 9.19 s and a three-epoch PPO update took about 0.20-0.33 s.
 
-These comparisons establish that the new execution and learning infrastructure
+The 223 transitions/s figure predates transactional pause/action refresh and is
+retained as a reader/model baseline; the current real-time collector must be
+rebenchmarked separately. These comparisons establish that the new execution and learning infrastructure
 is substantially more CPU-efficient. They do **not yet establish stronger final
 gameplay**: the current training budget is small and no compatible reference
 checkpoint is available for a controlled head-to-head evaluation.
@@ -139,6 +142,7 @@ CUDA_VISIBLE_DEVICES='' nice -n 10 taskset -c 0-47 \
   --workers 8 --threads 8 \
   --rollout-steps 256 --updates 100 \
   --analytic-geometry --hard-safety \
+  --deathbomb-safety \
   --snapshot-every 2
 ```
 
@@ -162,6 +166,14 @@ episodes.
 Reset waits until TH05's initial invincibility/input lock ends. The older
 readable-memory gate exposed roughly 80 uncontrollable transitions per reset
 and assigned their survival reward to actions that the game could not execute.
+
+The live game is paused while the policy or learner is working. During each
+36 ms action transaction, the command is refreshed every 1 ms because TH05
+rebuilds its input word from the physical keyboard every native frame. With
+`--deathbomb-safety`, a tiny native guard checks the exact pending-hit/miss-timer
+predicate on that refresh path and can preempt a policy action without waiting
+for Python inference. This is the online control plane; PPO updates, replay
+analysis, and future larger teachers belong to the paused learning plane.
 
 Evaluate one checkpoint:
 
@@ -411,22 +423,46 @@ actions against repeated game states; 1,600 API steps do not cover a full
 phase-2 episode. Until the adapter waits on an observed native-frame advance,
 formal training and evaluation retain the paced 36 ms step interval.
 
+### Transactional control and deathbomb audit
+
+A one-shot action-18 write did not change bomb stock: TH05's native keyboard
+refresh overwrote it before `player_bomb` observed it. Repeating the command 142
+times over 80 ms reliably changed stock from three to two. The environment now
+submits actions transactionally and freezes each emulator while the learner is
+inactive, so learning latency cannot silently advance the game.
+
+The native deathbomb guard follows the audited eight-frame window (`miss_time`
+40 through 33, plus the pending-hit byte). In a fixed-policy phase 2-to-4 trace,
+it cancelled collisions at steps 194, 509, and 757, consuming exactly the three
+available bombs without a miss. A fourth fatal path began at step 950 with zero
+bombs and registered at step 953. This proves the low-latency safety path works;
+it also proves that safety cannot replace a movement policy that reaches four
+fatal states. The event record is
+`experiments/2026-08-22-th05-lunatic-realtime-deathbomb.json`.
+
+The intended next architecture is therefore asymmetric: use expensive replay
+search, action-contrastive risk, or a larger sequence teacher offline while the
+games are paused, then distill its action distribution into the small recurrent
+online actor. Deployment acceptance must include no-miss completion and measured
+inference/control latency; raw argmax is already a failed distillation rule.
+
 ## Next experiments
 
 The highest-value next work is:
 
-1. Audit deathbomb timing and special-projectile collision boxes, then attribute
-   remaining misses by hazard class before widening any predictive mask.
-2. Synchronize each environment step to an observed native-frame advance, then
+1. Attribute the fourth fatal trajectory by hazard class and build an offline
+   action-contrastive teacher; distill it into the small deadline-bounded actor.
+2. Audit special-projectile collision boxes before widening any predictive mask.
+3. Synchronize each environment step to an observed native-frame advance, then
    implement a reset-aware sequence-block collector and verify its on-policy
    age bound before using its throughput result in algorithm comparisons.
-3. Add enemy tokens and evaluate the implemented time-to-collision features;
+4. Add enemy tokens and evaluate the implemented time-to-collision features;
    the current 273-float schema
    includes nearest bullets/special projectiles but not a compact enemy set.
-4. Expand backward from Stage 1 phase 2 only after a held-out no-miss clear,
+5. Expand backward from Stage 1 phase 2 only after a held-out no-miss clear,
    then reduce starting power/resources and advance to full-stage/full-game
    completion.
-5. Implement TH01-04 adapters behind the same Gymnasium interface and add
+6. Implement TH01-04 adapters behind the same Gymnasium interface and add
    per-game contract tests before claiming full old-five-games support.
 
 The official [ReC98 P0335 release](https://github.com/nmlgc/ReC98/releases/tag/P0335)

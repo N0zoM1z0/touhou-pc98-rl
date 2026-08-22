@@ -1,0 +1,106 @@
+{
+  "date": "2026-08-22",
+  "scenario": {
+    "stage": 1,
+    "patch_stage_index": 0,
+    "phase": 2,
+    "end_phase": 4,
+    "rank": 3,
+    "character": 2,
+    "power": 128,
+    "lives": 3,
+    "bombs": 3
+  },
+  "source_audit": {
+    "miss_animation_frames": 32,
+    "deathbomb_window_frames": 8,
+    "accepted_miss_timer_values": [40, 39, 38, 37, 36, 35, 34, 33],
+    "collision_pending_flag": "player_is_hit",
+    "acceptance_effect": "player_bomb clears miss_time and player_is_hit before the miss is registered"
+  },
+  "control_audit": {
+    "single_write_normal_bomb": {
+      "bombs_before": 3,
+      "bombs_after": 3,
+      "conclusion": "TH05's native keyboard refresh overwrote a one-shot key_det write before player_bomb observed it"
+    },
+    "refreshed_normal_bomb": {
+      "duration_ms": 80,
+      "writes": 142,
+      "bombs_before": 3,
+      "bombs_after": 2,
+      "conclusion": "repeated submission establishes reliable action delivery"
+    },
+    "transactional_step": {
+      "policy_interval_ms": 36,
+      "command_refresh_ms": 1,
+      "emulator_paused_between_steps": true,
+      "native_deathbomb_guard": true,
+      "conclusion": "learner and inference latency no longer advances the game without an agent action; the native guard can preempt a policy command inside an action window"
+    }
+  },
+  "fixed_policy_diagnostic": {
+    "checkpoint": "models/safety/th05-s1-lunatic-p2-p4-maskh6-selected.pt",
+    "checkpoint_sha256": "101d24f43b24b36522593bbe16bd0d1e2b267114421f8b595e6ec88b4965ea6a",
+    "policy": "deterministic argmax",
+    "reported_seed": 692,
+    "warning": "The policy seed is fixed, but the native game RNG is not independently controlled; this is a causal event trace, not a paired statistical estimate.",
+    "events": [
+      {
+        "step": 194,
+        "bombs_before": 3,
+        "bombs_after": 2,
+        "online_guard": true,
+        "miss": false
+      },
+      {
+        "step": 508,
+        "bombs_before": 2,
+        "bombs_after": 2,
+        "online_guard": true,
+        "window_visible_after_step": true
+      },
+      {
+        "step": 509,
+        "bombs_before": 2,
+        "bombs_after": 1,
+        "sampled_guard": true,
+        "online_guard": true,
+        "miss": false
+      },
+      {
+        "step": 756,
+        "bombs_before": 1,
+        "bombs_after": 1,
+        "online_guard": true,
+        "window_visible_after_step": true
+      },
+      {
+        "step": 757,
+        "bombs_before": 1,
+        "bombs_after": 0,
+        "sampled_guard": true,
+        "online_guard": true,
+        "miss": false
+      },
+      {
+        "step": 950,
+        "bombs_before": 0,
+        "bombs_after": 0,
+        "online_guard": true,
+        "window_visible_after_step": true
+      },
+      {
+        "step": 953,
+        "bombs_before": 0,
+        "bombs_after": 3,
+        "miss": true
+      }
+    ],
+    "completed_steps": 1200,
+    "terminal": false,
+    "successful_deathbombs": 3,
+    "misses": 1
+  },
+  "conclusion": "The low-latency online guard reliably converts all three available bombs into three cancelled collisions. A fourth fatal trajectory remains, so deathbomb safety fixes control latency but cannot substitute for a stronger movement policy. The next learner should use offline action-contrastive supervision or a stronger teacher and distill the result into a small online actor."
+}
