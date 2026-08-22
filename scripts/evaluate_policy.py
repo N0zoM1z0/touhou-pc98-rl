@@ -14,7 +14,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from pc98rl.distributions import MaskedCategorical
-from pc98rl.env import TH05CPUEnv, TH05_KINEMATICS
+from pc98rl.env import TH05CPUEnv, TH05_KINEMATICS, describe_th05_scenario
 from pc98rl.heuristic import SafetyHeuristic
 
 
@@ -74,8 +74,10 @@ def evaluate(
     constrained_steps = 0
     removed_probability_mass = 0.0
     observation = np.zeros(env.observation_space.shape, dtype=np.float32)
+    scenario = None
     try:
         observation, info = env.reset(seed=seed)
+        scenario = describe_th05_scenario(observation)
         action_mask = info["action_mask"]
         for _ in range(steps):
             if policy == "random":
@@ -134,6 +136,7 @@ def evaluate(
         "terminal": bool(terminal),
         "success": end_flag == 2,
         "end_flag": end_flag,
+        "scenario": scenario,
         "analytic_geometry": analytic_geometry if model is not None else None,
         "hard_safety": hard_safety,
         "constrained_step_fraction": round(

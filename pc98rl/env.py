@@ -78,6 +78,23 @@ class TH05Constraints(ConstraintProvider):
 TH05_CONSTRAINTS = TH05Constraints()
 
 
+def describe_th05_scenario(observation: np.ndarray) -> dict[str, int | str]:
+    """Decode stable resident configuration fields from a compact observation."""
+    observation = np.asarray(observation, dtype=np.float32)
+    if observation.shape != (FEATURE_DIM,):
+        raise ValueError(f"expected {FEATURE_DIM} features")
+    stage_index = int(np.rint(observation[13] * 6.0))
+    return {
+        "stage": "extra" if stage_index == 6 else stage_index + 1,
+        "patch_stage_index": stage_index,
+        "character": int(np.rint(observation[12] * 3.0)),
+        "rank": int(np.rint(observation[16] * 3.0)),
+        "initial_power": int(np.rint(observation[8] * 128.0)),
+        "configured_lives": int(np.rint(observation[14] * 8.0)),
+        "configured_bombs": int(np.rint(observation[15] * 8.0)),
+    }
+
+
 def resolve_dosbox_executable(candidate: str | Path | None = None) -> Path:
     """Resolve DOSBox-X without requiring callers to modify ``PATH``."""
     requested = candidate or os.environ.get("PC98RL_DOSBOX_X")

@@ -129,6 +129,9 @@ means inadequate for the stated experimental setting, not universally wrong.
     Readable memory implies rollout readiness & About 80 opening action slots
     ignore control but still emit survival reward & Reset gate waits for the
     player input lock to end \\
+    Patch stage values are human numbered & The loader writes them directly to
+    TH05's zero-based resident stage, silently shifting scenarios by one &
+    Human Stage 1--6 mapped to resident 0--5; both values recorded \\
     \bottomrule
   \end{tabular}
 \end{table}
@@ -298,10 +301,15 @@ to PyTorch.  The software stack used Python 3.14.6, PyTorch 2.13.0+cpu, and
 DOSBox-X tag \texttt{dosbox-x-v2026.07.02}.
 
 \paragraph{Game condition.}
-TH05 starts at stage 1 with three lives, three bombs, character 2, rank 0, and
-power 0.  The environment advances at a 36 ms action interval.  Evaluations are
-stochastic and paired by PyTorch sampling seed.  The game itself is not yet
-randomized through a controlled seed API.
+The first short-run dataset actually starts at Stage 2 (resident stage index 1)
+with three lives, three bombs, character 2, rank 0, and power 0.  It was
+initially labelled Stage 1 by following the patch README; source audit showed
+that the loader assigns \texttt{skip\_to} directly to TH05's zero-based resident
+field.  We retain and relabel those measurements rather than discard or rewrite
+them.  New scenario tooling accepts human Stage 1--6 and writes resident 0--5.
+The environment advances at a 36 ms action interval.  Evaluations are stochastic
+and paired by PyTorch sampling seed.  The game itself is not yet randomized
+through a controlled seed API.
 
 \paragraph{Training.}
 The selected policy comes from training seed 202 at update 8: 16,384 total

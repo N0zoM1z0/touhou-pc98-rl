@@ -1,13 +1,14 @@
 {
   "date": "2026-08-22",
-  "scope": "TH05 stage-1 short-prefix CPU-only baseline",
+  "scope": "TH05 Stage 2 short-prefix CPU-only baseline (resident stage index 1)",
   "software": {
     "dosbox_x_tag": "dosbox-x-v2026.07.02",
     "python": "3.14.6",
     "pytorch": "2.13.0+cpu"
   },
   "game_config": {
-    "stage": 1,
+    "stage": 2,
+    "patch_stage_index": 1,
     "lives": 3,
     "bombs": 3,
     "character": 2,

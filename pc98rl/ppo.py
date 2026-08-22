@@ -17,7 +17,12 @@ import torch
 from torch import nn
 
 from .distributions import MaskedCategorical
-from .env import DEFAULT_REWARD_WEIGHTS, TH05CPUEnv, TH05_KINEMATICS
+from .env import (
+    DEFAULT_REWARD_WEIGHTS,
+    TH05CPUEnv,
+    TH05_KINEMATICS,
+    describe_th05_scenario,
+)
 from .model import FEATURE_DIM, EntityActorCritic
 
 
@@ -231,10 +236,14 @@ def train(args: argparse.Namespace) -> None:
     )
     observation = pool.observations
     action_mask = pool.action_masks
+    scenarios = [describe_th05_scenario(item) for item in observation]
+    scenario = scenarios[0]
     hidden = torch.zeros(1, args.workers, model.hidden_size)
     objective_weights = np.asarray(args.objective_weights, dtype=np.float32)
     started = time.perf_counter()
     try:
+        if any(item != scenario for item in scenarios[1:]):
+            raise RuntimeError("rollout workers started with different TH05 scenarios")
         for update in range(first_update, first_update + args.updates):
             rollout_started = time.perf_counter()
             observations = np.empty(
@@ -428,6 +437,7 @@ def train(args: argparse.Namespace) -> None:
                 "early_stop": stop_early,
                 "analytic_geometry": args.analytic_geometry,
                 "hard_safety": args.hard_safety,
+                "scenario": scenario,
                 "constrained_step_fraction": round(
                     float(np.mean(np.any(~action_masks, axis=-1)))
                     if args.hard_safety
@@ -451,6 +461,7 @@ def train(args: argparse.Namespace) -> None:
                 "update": update + 1,
                 "environment_steps": environment_steps,
                 "args": vars(args),
+                "scenario": scenario,
             }
             torch.save(checkpoint, checkpoint_path)
             if args.snapshot_every and (update + 1) % args.snapshot_every == 0:

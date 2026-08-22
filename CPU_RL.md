@@ -114,9 +114,13 @@ scripts/make_th05_scenario.sh \
 ```
 
 The script refuses to overwrite its input or an existing output unless
-`--force` is explicit. Stage uses the patch's `skip_to` numbering (1 is the
-first regular stage), and rank 3 is Lunatic. Models and reports must record the
-complete scenario rather than relying on a filename.
+`--force` is explicit. `--stage` is the human-facing regular-stage number;
+the script converts Stage 1--6 to the game's zero-based resident value 0--5.
+Use `--stage extra` for resident value 6. This conversion is deliberate: the
+patch README describes `skip_to=2` as Stage 2 even though its loader assigns the
+value directly to the zero-based resident field. Rank 3 is Lunatic. Models and
+reports record both the display stage and internal index rather than relying on
+a filename.
 
 ## Train without disturbing other workloads
 
