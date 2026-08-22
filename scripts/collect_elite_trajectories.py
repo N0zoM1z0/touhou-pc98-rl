@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Collect complete no-miss TH05 trajectories for offline distillation."""
+"""Collect shield-aware TH05 trajectories for offline policy improvement."""
 
 from __future__ import annotations
 
@@ -23,6 +23,7 @@ def _collect(task: tuple) -> dict:
         steps,
         regular_horizon,
         regular_margin,
+        retain_all,
     ) = task
     import torch
 
@@ -97,7 +98,7 @@ def _collect(task: tuple) -> dict:
     completed_steps = len(actions)
     elite = bool(success and deaths == 0)
     trajectory_path = None
-    if elite:
+    if elite or retain_all:
         trajectory_path = Path(output_dir) / f"seed_{seed}.npz"
         np.savez_compressed(
             trajectory_path,
@@ -106,6 +107,11 @@ def _collect(task: tuple) -> dict:
             action_masks=np.asarray(masks, dtype=np.bool_),
             policy_valid=np.asarray(policy_valid, dtype=np.bool_),
             bombs_used=np.asarray(bombs_used, dtype=np.int64),
+            deaths=np.asarray(deaths, dtype=np.int64),
+            success=np.asarray(success, dtype=np.bool_),
+            no_miss_success=np.asarray(elite, dtype=np.bool_),
+            end_flag=np.asarray(end_flag, dtype=np.int64),
+            step_limit=np.asarray(steps, dtype=np.int64),
             seed=np.asarray(seed, dtype=np.int64),
         )
     return {
@@ -131,6 +137,11 @@ def main() -> None:
     parser.add_argument("--jobs", type=int, default=8)
     parser.add_argument("--regular-bullet-safety-horizon", type=int, default=6)
     parser.add_argument("--regular-bullet-safety-margin", type=float, default=0.0)
+    parser.add_argument(
+        "--retain-all",
+        action="store_true",
+        help="save timeout and miss trajectories as negative outcome examples",
+    )
     args = parser.parse_args()
     if len(set(args.seeds)) != len(args.seeds):
         parser.error("seeds must be unique")
@@ -151,6 +162,7 @@ def main() -> None:
             args.steps,
             args.regular_bullet_safety_horizon,
             args.regular_bullet_safety_margin,
+            args.retain_all,
         )
         for seed in args.seeds
     ]
@@ -176,17 +188,30 @@ def main() -> None:
         "regular_bullet_safety_horizon": args.regular_bullet_safety_horizon,
         "regular_bullet_safety_margin": args.regular_bullet_safety_margin,
         "deathbomb_safety": True,
+        "retain_all": args.retain_all,
         "attempts": len(episodes),
         "elites": int(sum(episode["no_miss_success"] for episode in episodes)),
         "elite_transitions": int(
-            sum(episode["attributable_actions"] for episode in episodes if episode["no_miss_success"])
+            sum(
+                episode["attributable_actions"]
+                for episode in episodes
+                if episode["no_miss_success"]
+            )
         ),
         "episodes": episodes,
     }
     report_path = Path(args.report)
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
-    print(json.dumps({key: report[key] for key in ("attempts", "elites", "elite_transitions")}, sort_keys=True))
+    print(
+        json.dumps(
+            {
+                key: report[key]
+                for key in ("attempts", "elites", "elite_transitions")
+            },
+            sort_keys=True,
+        )
+    )
 
 
 if __name__ == "__main__":
