@@ -83,6 +83,105 @@ DOSBox-X supplies PC-98 emulation \cite{dosboxx2026}.  ReC98 release P0335 is
 used only as a clean boot baseline \cite{rec98p0335}; it is not a runtime or
 build dependency.
 
+\section{Failure analysis of the reference baseline}
+
+The reference project solved valuable reverse-engineering problems, but its
+released implementation encodes assumptions that do not hold for our CPU-only,
+multi-process, current-emulator setting.  We audited those assumptions and
+reproduced their consequences before replacing them.  Table~\ref{tab:failures}
+separates observed failure modes from design preferences; ``inadequate'' here
+means inadequate for the stated experimental setting, not universally wrong.
+
+\begin{table}[ht]
+  \centering
+  \small
+  \caption{Reference-baseline assumptions, observed consequences, and our
+  replacements.}
+  \label{tab:failures}
+  \begin{tabular}{p{0.21\linewidth}p{0.32\linewidth}p{0.35\linewidth}}
+    \toprule
+    Baseline assumption & Why it fails here & Replacement \\
+    \midrule
+    XPU/CUDA-only package and dense CNN input & No supported GPU is available;
+    each 2,048-step map rollout was documented as 1.62 GiB & CPU PyTorch lockfile,
+    compact entity sets, and a small GRU \\
+    At most 8--10 MiB per scanned memory region & The current DOSBox-X guest
+    mapping is about 30 MiB, so game signatures are never searched & Writable
+    anonymous-region scan with a tested 64 MiB safety cap \\
+    Shared host game directory & Concurrent emulators can read and write the
+    same configuration and score files & One private HDI copy and exact child
+    PID per environment \\
+    Dense $24\times92\times96$ maps every step & Allocation and language-boundary
+    transfer dominate CPU inference & 273-float native compact reader \\
+    Normalize every objective before weighting & Reward magnitude loses its
+    semantic meaning and sparse/noisy objectives receive unit variance & Vector
+    GAE, fixed semantic scalarization, then one normalization \\
+    Overwrite a latest-only checkpoint & A later update can silently replace a
+    better earlier policy & Periodic snapshots, validation LCB, untouched test \\
+    No deadline for a live-but-stalled worker & The learner can wait forever
+    while leaving emulator children behind & Bounded startup/step IPC and exact
+    cleanup \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{Version-fragile systems assumptions}
+
+The released memory walker discards mappings larger than 10 MiB during its
+initial search and uses an 8 MiB limit for subsequent readable-region filters.
+On the tested DOSBox-X release, the relevant writable guest mapping is roughly
+30 MiB.  This is a hard compatibility failure rather than a throughput issue:
+the correct signature cannot be found in bytes that are never searched.  The
+new 64 MiB cap is still bounded, but its value is checked against the actual
+mapping layout.  Searches are further restricted to writable anonymous
+regions, retaining a small candidate set.
+
+The original spawn path correctly attaches to its newly created child, but all
+workers mount one host \texttt{export} directory.  Its separate attach-existing
+path chooses the first process returned by a name search.  The former risks
+cross-worker file-state interference and the latter is ambiguous whenever
+unrelated emulators run on the host.  Private writable disk images plus exact
+child ownership make environment identity explicit.  This matters for science
+as well as reliability: a reset is not reproducible if another worker can alter
+its persistent state.
+
+The same audit found unbounded coordination waits for workers that remain alive
+but stop responding, and setup instructions that rely on privileged execution
+and world-writable build directories.  Our runner instead uses child-process
+tracing, finite deadlines, deterministic cleanup, and ordinary user
+permissions.  These changes reduce both stalled experiments and accidental
+interference with unrelated jobs.
+
+\subsection{CPU cost is determined by representation}
+
+The reference package pins an XPU build of PyTorch and states that a GPU is
+required.  More importantly, its learning path stores a
+$24\times92\times96$ tensor for every transition, even though most cells are
+empty.  Merely selecting a CPU wheel would therefore leave the principal
+allocation, copy, memory-bandwidth, and CNN costs intact.  Our change is
+algorithmic as well as infrastructural: nearby hazards are variable-size sets,
+so a set encoder expresses the symmetry directly and makes CPU inference
+smaller.  Table~\ref{tab:reader} reports the resulting measured reader cost.
+
+\subsection{Optimization semantics and model selection}
+
+For objective $o$, the reference trainer first constructs
+$\widehat{A}^{(o)}=\operatorname{standardize}(A^{(o)})$, combines these
+standardized values, and standardizes the sum again.  Consequently, multiplying
+an objective's raw reward by almost any positive constant has no effect, and a
+rare or noisy objective can be promoted to the same empirical variance as a
+dense, reliable one.  This is not intrinsically invalid, but it no longer
+implements scalarization in declared reward units.  We retain a vector critic
+and vector GAE, apply explicit semantic weights to the unnormalized advantages,
+and normalize the resulting policy advantage exactly once.
+
+Finally, overwriting a single ``latest'' file assumes that training progress is
+monotone.  Our short runs directly contradict that assumption: a policy that
+improved at 24,576 transitions regressed badly by 49,152.  Periodic immutable
+snapshots, a disjoint validation split, and an untouched paired test do not
+eliminate selection bias, but they make it visible and prevent the last update
+from becoming the result by accident.
+
 \section{System design}
 
 \subsection{Reproducible native-game execution}
