@@ -83,11 +83,14 @@ uv sync
 cargo test --lib
 uv sync --reinstall-package touhou-pc98-rl
 
-export PATH="$PWD/external/dosbox-x-install/bin:$PATH"
 CUDA_VISIBLE_DEVICES='' nice -n 10 taskset -c 0-7 \
   xvfb-run --auto-servernum uv run python scripts/evaluate_policy.py \
   --image external/th05-rl.hdi --policy random --steps 200 --seed 41
 ```
+
+The environment first uses `PC98RL_DOSBOX_X` when set, then searches `PATH`,
+then checks `external/dosbox-x-install/bin/dosbox-x`. It passes the resolved
+absolute executable to each native child spawn.
 
 `ptrace_scope` must allow reading the child DOSBox process. Check it with:
 
@@ -123,7 +126,6 @@ improved through eight threads, while 16 threads caused severe oversubscription.
 Use `taskset` to reserve only known-idle cores and a positive niceness value:
 
 ```bash
-export PATH="$PWD/external/dosbox-x-install/bin:$PATH"
 CUDA_VISIBLE_DEVICES='' nice -n 10 taskset -c 0-47 \
   xvfb-run --auto-servernum uv run python -m pc98rl.ppo \
   --image external/th05-rl.hdi \

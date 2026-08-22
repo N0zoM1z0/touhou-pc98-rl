@@ -151,11 +151,12 @@ impl MemoryWatcher {
     /// child and attached to main directly. So I would not require perfect timing
     /// to launch the agent.
     #[new]
-    #[pyo3(signature = (spawn_dosbox=false, pid=None, image_path=None))]
+    #[pyo3(signature = (spawn_dosbox=false, pid=None, image_path=None, dosbox_executable=None))]
     pub fn new(
         spawn_dosbox: bool,
         pid: Option<i32>,
         image_path: Option<String>,
+        dosbox_executable: Option<String>,
     ) -> PyResult<Self> {
         if spawn_dosbox {
             if pid.is_some() {
@@ -163,11 +164,16 @@ impl MemoryWatcher {
                     "pid cannot be combined with spawn_dosbox=True",
                 ));
             }
-            Self::new_spawn(image_path.as_deref())
+            Self::new_spawn(image_path.as_deref(), dosbox_executable.as_deref())
         } else {
             if image_path.is_some() {
                 return Err(pyo3::exceptions::PyValueError::new_err(
                     "image_path requires spawn_dosbox=True",
+                ));
+            }
+            if dosbox_executable.is_some() {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "dosbox_executable requires spawn_dosbox=True",
                 ));
             }
             Self::new_attach(pid)
@@ -398,7 +404,7 @@ impl MemoryWatcher {
         })
     }
 
-    fn new_spawn(image_path: Option<&str>) -> PyResult<Self> {
+    fn new_spawn(image_path: Option<&str>, dosbox_executable: Option<&str>) -> PyResult<Self> {
         use std::process::Command;
 
         let project_dir = std::env::current_dir()
@@ -407,7 +413,8 @@ impl MemoryWatcher {
             })?;
         let export_dir = project_dir.join("export");
 
-        let mut command = Command::new("dosbox-x");
+        let executable = dosbox_executable.unwrap_or("dosbox-x");
+        let mut command = Command::new(executable);
         if let Some(image_path) = image_path {
             let image_path = std::fs::canonicalize(image_path).map_err(|e| {
                 pyo3::exceptions::PyValueError::new_err(format!(
@@ -445,8 +452,8 @@ impl MemoryWatcher {
             .spawn()
             .map_err(|e| {
                 pyo3::exceptions::PyRuntimeError::new_err(format!(
-                    "Failed to spawn dosbox-x: {}",
-                    e
+                    "Failed to spawn DOSBox-X from '{}': {}",
+                    executable, e
                 ))
             })?;
 

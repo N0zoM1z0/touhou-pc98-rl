@@ -43,12 +43,14 @@ scripts/make_th05_scenario.sh \
 uv sync --reinstall-package touhou-pc98-rl
 make test
 
-export PATH="$PWD/external/dosbox-x-install/bin:$PATH"
 CUDA_VISIBLE_DEVICES='' nice -n 10 taskset -c 0-47 \
   xvfb-run --auto-servernum uv run python -m pc98rl.ppo \
   --image external/th05-lunatic-stage1.hdi --workers 8 --threads 8 \
   --analytic-geometry --hard-safety
 ```
+
+The environment discovers the repository-local DOSBox-X build automatically.
+Set `PC98RL_DOSBOX_X=/absolute/path/to/dosbox-x` to select another build.
 
 See [CPU_RL.md](CPU_RL.md) for the full setup, benchmark methodology, honest
 short-run results, evaluation commands, known failure modes, and next research

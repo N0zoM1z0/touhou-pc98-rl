@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import tempfile
 import time
@@ -77,6 +78,31 @@ class TH05Constraints(ConstraintProvider):
 TH05_CONSTRAINTS = TH05Constraints()
 
 
+def resolve_dosbox_executable(candidate: str | Path | None = None) -> Path:
+    """Resolve DOSBox-X without requiring callers to modify ``PATH``."""
+    requested = candidate or os.environ.get("PC98RL_DOSBOX_X")
+    if requested is not None:
+        requested_path = Path(requested).expanduser()
+        if requested_path.parent != Path("."):
+            resolved = requested_path.resolve()
+        else:
+            found = shutil.which(str(requested_path))
+            resolved = Path(found) if found else requested_path.resolve()
+        if resolved.is_file() and os.access(resolved, os.X_OK):
+            return resolved
+        raise FileNotFoundError(f"DOSBox-X executable is not runnable: {resolved}")
+
+    found = shutil.which("dosbox-x")
+    if found:
+        return Path(found).resolve()
+    local = Path(__file__).resolve().parents[1] / "external/dosbox-x-install/bin/dosbox-x"
+    if local.is_file() and os.access(local, os.X_OK):
+        return local
+    raise FileNotFoundError(
+        "DOSBox-X was not found; build the local emulator or set PC98RL_DOSBOX_X"
+    )
+
+
 class TH05CPUEnv(gym.Env):
     """One isolated TH05 instance backed by a private copy of a patched HDI.
 
@@ -96,6 +122,7 @@ class TH05CPUEnv(gym.Env):
         reward_weights: np.ndarray = DEFAULT_REWARD_WEIGHTS,
         warmup_timeout_s: float = 5.0,
         spawn_retries: int = 3,
+        dosbox_executable: str | Path | None = None,
     ) -> None:
         super().__init__()
         self.image_template = Path(image_template).expanduser().resolve()
@@ -109,6 +136,7 @@ class TH05CPUEnv(gym.Env):
             raise ValueError("reward_scales and reward_weights must have shape (3,)")
 
         self.warmup_timeout_s = float(warmup_timeout_s)
+        self.dosbox_executable = resolve_dosbox_executable(dosbox_executable)
         self.spawn_retries = int(spawn_retries)
         if self.spawn_retries < 1:
             raise ValueError("spawn_retries must be positive")
@@ -182,7 +210,9 @@ class TH05CPUEnv(gym.Env):
             shutil.copyfile(self.image_template, self._working_image)
             try:
                 self._watcher = _native.MemoryWatcher(
-                    spawn_dosbox=True, image_path=str(self._working_image)
+                    spawn_dosbox=True,
+                    image_path=str(self._working_image),
+                    dosbox_executable=str(self.dosbox_executable),
                 )
                 observation, info = self._read_ready_state()
                 self._observation = observation
