@@ -18,6 +18,31 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.evaluate_policy import evaluate
 
 
+RUNTIME_DEFAULTS = {
+    "hard_safety": False,
+    "emergency_bomb_clearance": 0.0,
+    "emergency_bomb_horizon": 6.0,
+    "regular_bullet_safety_horizon": 0,
+    "regular_bullet_safety_margin": 0.0,
+    "regular_bullet_least_risk_fallback": False,
+    "deathbomb_safety": False,
+}
+
+
+def runtime_config_mismatches(
+    checkpoint_arguments: list[dict], overrides: dict
+) -> dict[str, list]:
+    """Find deployment settings that would differ across policy candidates."""
+    mismatches = {}
+    for name, default in RUNTIME_DEFAULTS.items():
+        if overrides.get(name) is not None:
+            continue
+        values = [arguments.get(name, default) for arguments in checkpoint_arguments]
+        if any(value != values[0] for value in values[1:]):
+            mismatches[name] = values
+    return mismatches
+
+
 def _evaluate_task(task: tuple) -> tuple[str, dict]:
     """Evaluate one snapshot/seed pair in an isolated process."""
     (
@@ -26,6 +51,9 @@ def _evaluate_task(task: tuple) -> tuple[str, dict]:
         deterministic,
         steps,
         seed,
+        hard_safety,
+        emergency_bomb_clearance,
+        emergency_bomb_horizon,
         regular_bullet_safety_horizon,
         regular_bullet_safety_margin,
         regular_bullet_least_risk_fallback,
@@ -38,6 +66,9 @@ def _evaluate_task(task: tuple) -> tuple[str, dict]:
         deterministic=deterministic,
         steps=steps,
         seed=seed,
+        hard_safety=hard_safety,
+        emergency_bomb_clearance=emergency_bomb_clearance,
+        emergency_bomb_horizon=emergency_bomb_horizon,
         regular_bullet_safety_horizon=regular_bullet_safety_horizon,
         regular_bullet_safety_margin=regular_bullet_safety_margin,
         regular_bullet_least_risk_fallback=regular_bullet_least_risk_fallback,
@@ -69,6 +100,11 @@ def main() -> None:
     )
     parser.add_argument("--lcb-z", type=float, default=1.0)
     parser.add_argument("--deterministic", action="store_true")
+    parser.add_argument(
+        "--hard-safety", action=argparse.BooleanOptionalAction, default=None
+    )
+    parser.add_argument("--emergency-bomb-clearance", type=float, default=None)
+    parser.add_argument("--emergency-bomb-horizon", type=float, default=None)
     parser.add_argument("--regular-bullet-safety-horizon", type=int, default=None)
     parser.add_argument("--regular-bullet-safety-margin", type=float, default=None)
     parser.add_argument(
@@ -84,6 +120,11 @@ def main() -> None:
     parser.add_argument("--output", default="models/pc98_entity_ppo_best.pt")
     parser.add_argument("--report", default="runs/pc98rl/checkpoint_selection.json")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--allow-runtime-config-comparison",
+        action="store_true",
+        help="allow an intentional safety/deployment configuration ablation",
+    )
     args = parser.parse_args()
 
     snapshots = [Path(path).expanduser().resolve() for path in args.snapshots]
@@ -94,6 +135,35 @@ def main() -> None:
         parser.error("seeds must be unique")
     if args.jobs < 1:
         parser.error("jobs must be at least 1")
+
+    import torch
+
+    checkpoint_arguments = [
+        torch.load(snapshot, map_location="cpu", weights_only=False).get("args", {})
+        for snapshot in snapshots
+    ]
+    runtime_overrides = {
+        "hard_safety": args.hard_safety,
+        "emergency_bomb_clearance": args.emergency_bomb_clearance,
+        "emergency_bomb_horizon": args.emergency_bomb_horizon,
+        "regular_bullet_safety_horizon": args.regular_bullet_safety_horizon,
+        "regular_bullet_safety_margin": args.regular_bullet_safety_margin,
+        "regular_bullet_least_risk_fallback": (
+            args.regular_bullet_least_risk_fallback
+        ),
+        "deathbomb_safety": args.deathbomb_safety,
+    }
+    mismatches = runtime_config_mismatches(
+        checkpoint_arguments, runtime_overrides
+    )
+    if mismatches and not args.allow_runtime_config_comparison:
+        details = ", ".join(
+            f"{name}={values}" for name, values in sorted(mismatches.items())
+        )
+        parser.error(
+            "candidate runtime configurations differ; pass explicit overrides "
+            "or --allow-runtime-config-comparison: " + details
+        )
 
     snapshot_strings = [str(snapshot) for snapshot in snapshots]
     evaluations_by_snapshot: dict[str, list[dict]] = {
@@ -106,6 +176,9 @@ def main() -> None:
             args.deterministic,
             args.steps,
             seed,
+            args.hard_safety,
+            args.emergency_bomb_clearance,
+            args.emergency_bomb_horizon,
             args.regular_bullet_safety_horizon,
             args.regular_bullet_safety_margin,
             args.regular_bullet_least_risk_fallback,
@@ -160,12 +233,16 @@ def main() -> None:
         "steps": args.steps,
         "jobs": args.jobs,
         "deterministic": args.deterministic,
+        "hard_safety": args.hard_safety,
+        "emergency_bomb_clearance": args.emergency_bomb_clearance,
+        "emergency_bomb_horizon": args.emergency_bomb_horizon,
         "regular_bullet_safety_horizon": args.regular_bullet_safety_horizon,
         "regular_bullet_safety_margin": args.regular_bullet_safety_margin,
         "regular_bullet_least_risk_fallback": (
             args.regular_bullet_least_risk_fallback
         ),
         "deathbomb_safety": args.deathbomb_safety,
+        "allow_runtime_config_comparison": args.allow_runtime_config_comparison,
         "lcb_z": args.lcb_z,
         "selected": best["snapshot"],
         "candidates": candidates,

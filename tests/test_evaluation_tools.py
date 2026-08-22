@@ -1,7 +1,7 @@
 import unittest
 
 from scripts.compare_policies import summarize
-from scripts.select_checkpoint import candidate_rank
+from scripts.select_checkpoint import candidate_rank, runtime_config_mismatches
 
 
 class EvaluationSummaryTest(unittest.TestCase):
@@ -52,6 +52,20 @@ class EvaluationSummaryTest(unittest.TestCase):
         self.assertEqual(summary["deaths"], 2)
         self.assertEqual(summary["successes"], 1)
         self.assertEqual(summary["mean_raw_reward"], [5.0, 3.0, -3.0])
+
+    def test_runtime_mismatch_requires_an_explicit_override(self):
+        arguments = [
+            {"deathbomb_safety": False, "regular_bullet_safety_horizon": 6},
+            {"deathbomb_safety": True, "regular_bullet_safety_horizon": 6},
+        ]
+        mismatches = runtime_config_mismatches(arguments, {})
+        self.assertEqual(mismatches, {"deathbomb_safety": [False, True]})
+        self.assertEqual(
+            runtime_config_mismatches(
+                arguments, {"deathbomb_safety": True}
+            ),
+            {},
+        )
 
 
 if __name__ == "__main__":
