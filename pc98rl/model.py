@@ -242,12 +242,13 @@ class EntityActorCritic(nn.Module):
         recurrent = recurrent[:, 0]
         return self.actor(recurrent), self.critic(recurrent), new_hidden
 
-    def forward_sequence(
+    def recurrent_sequence(
         self,
         features_seq: torch.Tensor,
         initial_hidden: torch.Tensor,
         dones_seq: torch.Tensor,
-    ):
+    ) -> torch.Tensor:
+        """Return flattened recurrent features with exact episode resets."""
         batch_size, seq_len = features_seq.shape[:2]
         encoded = self.encoder(features_seq)
 
@@ -266,5 +267,38 @@ class EntityActorCritic(nn.Module):
                 outputs.append(output)
             recurrent = torch.cat(outputs, dim=1)
 
-        flat = recurrent.reshape(batch_size * seq_len, self.hidden_size)
+        return recurrent.reshape(batch_size * seq_len, self.hidden_size)
+
+    def forward_sequence(
+        self,
+        features_seq: torch.Tensor,
+        initial_hidden: torch.Tensor,
+        dones_seq: torch.Tensor,
+    ):
+        flat = self.recurrent_sequence(features_seq, initial_hidden, dones_seq)
         return self.actor(flat), self.critic(flat)
+
+
+class FutureMissHead(nn.Module):
+    """Training-only policy-conditional risk prediction from recurrent state."""
+
+    def __init__(
+        self,
+        hidden_size: int,
+        action_dim: int,
+        horizon_count: int,
+        action_embedding_dim: int = 16,
+    ):
+        super().__init__()
+        if horizon_count < 1:
+            raise ValueError("horizon_count must be positive")
+        self.action_embedding = nn.Embedding(action_dim, action_embedding_dim)
+        self.network = nn.Sequential(
+            nn.Linear(hidden_size + action_embedding_dim, 64),
+            nn.SiLU(),
+            nn.Linear(64, horizon_count),
+        )
+
+    def forward(self, recurrent: torch.Tensor, actions: torch.Tensor) -> torch.Tensor:
+        action_features = self.action_embedding(actions)
+        return self.network(torch.cat((recurrent, action_features), dim=-1))

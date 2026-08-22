@@ -3,7 +3,13 @@ import unittest
 import numpy as np
 import torch
 
-from pc98rl.ppo import _apply_checkpoint, _as_sequences, _vector_gae
+from pc98rl.ppo import (
+    _apply_checkpoint,
+    _as_sequences,
+    _balanced_masked_bce,
+    _future_miss_targets,
+    _vector_gae,
+)
 
 
 class CpuPPOHelpersTest(unittest.TestCase):
@@ -51,6 +57,31 @@ class CpuPPOHelpersTest(unittest.TestCase):
             source.parameters(), target.parameters(), strict=True
         ):
             torch.testing.assert_close(source_parameter, target_parameter)
+
+    def test_future_miss_labels_do_not_cross_episode_boundaries(self):
+        misses = np.zeros((6, 2), dtype=np.bool_)
+        dones = np.zeros_like(misses)
+        dones[3, 0] = True
+        misses[4, 0] = True
+        targets, valid = _future_miss_targets(misses, dones, (1, 3))
+
+        self.assertEqual(targets[2, 0, 1], 0.0)
+        self.assertTrue(valid[2, 0, 1])
+        self.assertEqual(targets[4, 0, 1], 1.0)
+        self.assertTrue(valid[4, 0, 1])
+        self.assertFalse(valid[5, 1, 1])
+        self.assertTrue(valid[5, 1, 0])
+
+    def test_balanced_future_miss_loss_handles_sparse_classes(self):
+        logits = torch.zeros(4, 2, requires_grad=True)
+        targets = torch.tensor(
+            [[0.0, 0.0], [0.0, 1.0], [0.0, 0.0], [1.0, 1.0]]
+        )
+        valid = torch.ones_like(targets, dtype=torch.bool)
+        loss = _balanced_masked_bce(logits, targets, valid)
+        self.assertAlmostEqual(float(loss.item()), float(np.log(2.0)), places=6)
+        loss.backward()
+        self.assertTrue(torch.isfinite(logits.grad).all())
 
 
 if __name__ == "__main__":

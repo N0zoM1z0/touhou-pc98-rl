@@ -16,6 +16,7 @@ os.environ.setdefault("CUDA_VISIBLE_DEVICES", "")
 import numpy as np
 import torch
 from torch import nn
+from torch.nn import functional as F
 
 from .distributions import MaskedCategorical
 from .env import (
@@ -24,7 +25,7 @@ from .env import (
     TH05_KINEMATICS,
     describe_th05_scenario,
 )
-from .model import FEATURE_DIM, EntityActorCritic
+from .model import FEATURE_DIM, EntityActorCritic, FutureMissHead
 
 
 def _worker_main(connection, image: str, frame_interval_s: float, seed: int) -> None:
@@ -203,6 +204,82 @@ def _as_sequences(array: np.ndarray, sequence_length: int) -> np.ndarray:
     )
 
 
+def _future_miss_targets(
+    misses: np.ndarray,
+    dones: np.ndarray,
+    horizons: tuple[int, ...],
+) -> tuple[np.ndarray, np.ndarray]:
+    """Build episode-safe labels and censor masks from on-policy rollouts.
+
+    A transition is positive when a miss occurs from its resulting step through
+    the requested horizon.  A negative is valid only when the full horizon or
+    an episode terminal is observed.  Positive events remain valid even near an
+    unfinished rollout boundary because the event itself has already occurred.
+    """
+    misses = np.asarray(misses, dtype=np.bool_)
+    dones = np.asarray(dones, dtype=np.bool_)
+    if misses.shape != dones.shape or misses.ndim != 2:
+        raise ValueError("misses and dones must have matching [time, env] shapes")
+    if not horizons or any(horizon < 1 for horizon in horizons):
+        raise ValueError("future-miss horizons must be positive")
+
+    time_steps, environments = misses.shape
+    targets = np.zeros((time_steps, environments, len(horizons)), dtype=np.float32)
+    valid = np.zeros_like(targets, dtype=np.bool_)
+    for time_index in range(time_steps):
+        for environment in range(environments):
+            for horizon_index, horizon in enumerate(horizons):
+                observed_end = min(time_index + horizon, time_steps)
+                terminal_offsets = np.flatnonzero(
+                    dones[time_index:observed_end, environment]
+                )
+                terminated = bool(len(terminal_offsets))
+                if terminated:
+                    observed_end = time_index + int(terminal_offsets[0]) + 1
+                event = bool(misses[time_index:observed_end, environment].any())
+                targets[time_index, environment, horizon_index] = float(event)
+                valid[time_index, environment, horizon_index] = bool(
+                    event or terminated or time_index + horizon <= time_steps
+                )
+    return targets, valid
+
+
+def _balanced_masked_bce(
+    logits: torch.Tensor,
+    targets: torch.Tensor,
+    valid: torch.Tensor,
+) -> torch.Tensor:
+    """Average positive and negative risk losses without rollout-frequency bias."""
+    if logits.shape != targets.shape or logits.shape != valid.shape:
+        raise ValueError("risk logits, targets, and validity masks must match")
+    horizon_losses = []
+    for horizon_index in range(logits.shape[-1]):
+        horizon_valid = valid[:, horizon_index]
+        if not torch.any(horizon_valid):
+            continue
+        horizon_logits = logits[horizon_valid, horizon_index]
+        horizon_targets = targets[horizon_valid, horizon_index]
+        positive = horizon_targets > 0.5
+        negative = ~positive
+        class_losses = []
+        if torch.any(positive):
+            class_losses.append(
+                F.binary_cross_entropy_with_logits(
+                    horizon_logits[positive], horizon_targets[positive]
+                )
+            )
+        if torch.any(negative):
+            class_losses.append(
+                F.binary_cross_entropy_with_logits(
+                    horizon_logits[negative], horizon_targets[negative]
+                )
+            )
+        horizon_losses.append(torch.stack(class_losses).mean())
+    if not horizon_losses:
+        return logits.sum() * 0.0
+    return torch.stack(horizon_losses).mean()
+
+
 def _apply_checkpoint(
     model: nn.Module,
     optimizer: torch.optim.Optimizer,
@@ -229,6 +306,14 @@ def _sha256_file(path: Path) -> str:
 def train(args: argparse.Namespace) -> None:
     if args.rollout_steps % args.sequence_length:
         raise ValueError("rollout-steps must be divisible by sequence-length")
+    if args.future_miss_auxiliary_coefficient < 0.0:
+        raise ValueError("future-miss-auxiliary-coefficient must be non-negative")
+    risk_horizons = tuple(args.future_miss_horizons)
+    if any(horizon < 1 for horizon in risk_horizons):
+        raise ValueError("future-miss-horizons must be positive")
+    if len(set(risk_horizons)) != len(risk_horizons):
+        raise ValueError("future-miss-horizons must be unique")
+    risk_enabled = args.future_miss_auxiliary_coefficient > 0.0
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
     torch.set_num_threads(args.threads)
@@ -282,16 +367,42 @@ def train(args: argparse.Namespace) -> None:
             raise ValueError(
                 "--analytic-geometry must match the checkpoint architecture"
             )
+    if resume_checkpoint is not None:
+        saved_risk_enabled = resume_checkpoint.get("future_miss_head") is not None
+        if saved_risk_enabled != risk_enabled:
+            raise ValueError(
+                "future-miss auxiliary setting must match when resuming"
+            )
+        if risk_enabled and tuple(
+            resume_checkpoint.get("future_miss_horizons", ())
+        ) != risk_horizons:
+            raise ValueError("future-miss horizons must match when resuming")
 
     model = EntityActorCritic(
         analytic_geometry=args.analytic_geometry,
         kinematic_spec=TH05_KINEMATICS if args.analytic_geometry else None,
     ).cpu()
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate, eps=1e-5)
+    risk_head = (
+        FutureMissHead(
+            model.hidden_size,
+            action_dim=19,
+            horizon_count=len(risk_horizons),
+        ).cpu()
+        if risk_enabled
+        else None
+    )
+    optimization_parameters = list(model.parameters())
+    if risk_head is not None:
+        optimization_parameters.extend(risk_head.parameters())
+    optimizer = torch.optim.Adam(
+        optimization_parameters, lr=args.learning_rate, eps=1e-5
+    )
     if resume_checkpoint is not None:
         first_update, environment_steps = _apply_checkpoint(
             model, optimizer, resume_checkpoint, resume=True
         )
+        if risk_head is not None:
+            risk_head.load_state_dict(resume_checkpoint["future_miss_head"])
     elif initialization_checkpoint is not None:
         _apply_checkpoint(model, optimizer, initialization_checkpoint, resume=False)
 
@@ -395,6 +506,13 @@ def train(args: argparse.Namespace) -> None:
             scalar_advantages = (
                 scalar_advantages - scalar_advantages.mean()
             ) / (scalar_advantages.std() + 1e-8)
+            risk_targets = risk_valid = None
+            if risk_head is not None:
+                risk_targets, risk_valid = _future_miss_targets(
+                    rewards[..., 0] < -0.1,
+                    dones > 0.5,
+                    risk_horizons,
+                )
 
             sequence_length = args.sequence_length
             feature_sequences = _as_sequences(observations, sequence_length)
@@ -407,15 +525,33 @@ def train(args: argparse.Namespace) -> None:
             old_value_sequences = _as_sequences(values, sequence_length)
             done_sequences = _as_sequences(dones, sequence_length)
             action_mask_sequences = _as_sequences(action_masks, sequence_length)
+            risk_target_sequences = (
+                _as_sequences(risk_targets, sequence_length)
+                if risk_targets is not None
+                else None
+            )
+            risk_valid_sequences = (
+                _as_sequences(risk_valid, sequence_length)
+                if risk_valid is not None
+                else None
+            )
             initial_hidden = np.swapaxes(hidden_states, 0, 1)[
                 :, ::sequence_length
             ].reshape(-1, model.hidden_size)
 
             sequence_count = len(feature_sequences)
             update_started = time.perf_counter()
-            totals = {"policy": 0.0, "value": 0.0, "entropy": 0.0, "kl": 0.0}
+            totals = {
+                "policy": 0.0,
+                "value": 0.0,
+                "entropy": 0.0,
+                "kl": 0.0,
+                "auxiliary": 0.0,
+            }
             batches = 0
             model.train()
+            if risk_head is not None:
+                risk_head.train()
             stop_early = False
             for _ in range(args.epochs):
                 permutation = torch.randperm(sequence_count)
@@ -440,9 +576,27 @@ def train(args: argparse.Namespace) -> None:
                     ).reshape(-1, 19)
                     hidden_batch = torch.from_numpy(initial_hidden[indices]).unsqueeze(0)
 
-                    logits, new_values = model.forward_sequence(
-                        features_batch, hidden_batch, done_batch
-                    )
+                    auxiliary_loss = torch.zeros(())
+                    if risk_head is None:
+                        logits, new_values = model.forward_sequence(
+                            features_batch, hidden_batch, done_batch
+                        )
+                    else:
+                        recurrent = model.recurrent_sequence(
+                            features_batch, hidden_batch, done_batch
+                        )
+                        logits = model.actor(recurrent)
+                        new_values = model.critic(recurrent)
+                        risk_logits = risk_head(recurrent, actions_batch)
+                        risk_target_batch = torch.from_numpy(
+                            risk_target_sequences[indices]
+                        ).reshape(-1, len(risk_horizons))
+                        risk_valid_batch = torch.from_numpy(
+                            risk_valid_sequences[indices]
+                        ).reshape(-1, len(risk_horizons))
+                        auxiliary_loss = _balanced_masked_bce(
+                            risk_logits, risk_target_batch, risk_valid_batch
+                        )
                     distribution = MaskedCategorical(
                         logits=logits,
                         valid_mask=action_mask_batch if args.hard_safety else None,
@@ -472,11 +626,14 @@ def train(args: argparse.Namespace) -> None:
                         policy_loss
                         + args.value_coefficient * value_loss
                         - args.entropy_coefficient * entropy
+                        + args.future_miss_auxiliary_coefficient * auxiliary_loss
                     )
 
                     optimizer.zero_grad(set_to_none=True)
                     loss.backward()
-                    nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
+                    nn.utils.clip_grad_norm_(
+                        optimization_parameters, args.max_grad_norm
+                    )
                     optimizer.step()
 
                     approximate_kl = float(((ratio - 1.0) - log_ratio).mean().item())
@@ -485,6 +642,7 @@ def train(args: argparse.Namespace) -> None:
                     totals["value"] += float(value_loss.item())
                     totals["entropy"] += float(entropy.item())
                     totals["kl"] += approximate_kl
+                    totals["auxiliary"] += float(auxiliary_loss.item())
                     batches += 1
                 if epoch_kls and np.mean(epoch_kls) > args.target_kl:
                     stop_early = True
@@ -503,6 +661,26 @@ def train(args: argparse.Namespace) -> None:
                 "value_loss": round(totals["value"] / batches, 6),
                 "entropy": round(totals["entropy"] / batches, 6),
                 "approx_kl": round(totals["kl"] / batches, 6),
+                "future_miss_auxiliary_loss": round(
+                    totals["auxiliary"] / batches, 6
+                ),
+                "future_miss_auxiliary_coefficient": (
+                    args.future_miss_auxiliary_coefficient
+                ),
+                "future_miss_horizons": list(risk_horizons) if risk_enabled else [],
+                "future_miss_valid_fraction": (
+                    np.mean(risk_valid, axis=(0, 1)).round(6).tolist()
+                    if risk_valid is not None
+                    else []
+                ),
+                "future_miss_positive_fraction": (
+                    (
+                        np.sum(risk_targets * risk_valid, axis=(0, 1))
+                        / np.maximum(np.sum(risk_valid, axis=(0, 1)), 1)
+                    ).round(6).tolist()
+                    if risk_targets is not None
+                    else []
+                ),
                 "reward_mean": np.mean(rewards, axis=(0, 1)).round(6).tolist(),
                 "death_events": int(np.count_nonzero(rewards[..., 0] < -0.1)),
                 "action_frequency": (
@@ -535,6 +713,10 @@ def train(args: argparse.Namespace) -> None:
                 file.write(json.dumps(metrics, sort_keys=True) + "\n")
             checkpoint = {
                 "model": model.state_dict(),
+                "future_miss_head": (
+                    risk_head.state_dict() if risk_head is not None else None
+                ),
+                "future_miss_horizons": list(risk_horizons) if risk_enabled else [],
                 "optimizer": optimizer.state_dict(),
                 "update": update + 1,
                 "environment_steps": environment_steps,
@@ -573,6 +755,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--value-clip", type=float, default=0.2)
     parser.add_argument("--value-coefficient", type=float, default=0.5)
     parser.add_argument("--entropy-coefficient", type=float, default=0.02)
+    parser.add_argument(
+        "--future-miss-auxiliary-coefficient",
+        type=float,
+        default=0.0,
+        help="weight for the training-only balanced future-miss prediction loss",
+    )
+    parser.add_argument(
+        "--future-miss-horizons",
+        type=int,
+        nargs="+",
+        default=[15, 30],
+        help="on-policy action horizons for censored future-miss labels",
+    )
     parser.add_argument("--max-grad-norm", type=float, default=0.5)
     parser.add_argument("--target-kl", type=float, default=0.03)
     parser.add_argument(

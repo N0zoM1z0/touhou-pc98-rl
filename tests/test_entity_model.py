@@ -9,6 +9,7 @@ from pc98rl.model import (
     FEATURE_DIM,
     EntityActorCritic,
     EntitySetEncoder,
+    FutureMissHead,
     add_kinematic_features,
 )
 
@@ -41,6 +42,12 @@ class EntityActorCriticTest(unittest.TestCase):
         logits, values = self.model.forward_sequence(features, hidden, dones)
         self.assertEqual(logits.shape, (10, 19))
         self.assertEqual(values.shape, (10, 3))
+
+    def test_training_only_future_miss_head_shapes(self):
+        recurrent = torch.randn(7, self.model.hidden_size)
+        actions = torch.arange(7) % 19
+        head = FutureMissHead(self.model.hidden_size, action_dim=19, horizon_count=2)
+        self.assertEqual(head(recurrent, actions).shape, (7, 2))
 
     def test_all_padding_is_finite(self):
         features = torch.zeros(4, FEATURE_DIM)
