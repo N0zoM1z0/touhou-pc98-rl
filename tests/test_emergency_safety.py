@@ -74,6 +74,19 @@ class AuditedRegularBulletShieldTest(unittest.TestCase):
         np.testing.assert_array_equal(mask, base)
         self.assertFalse(intervened)
 
+    def test_decodes_native_byte_survival_vector(self):
+        base = np.zeros(19, dtype=np.bool_)
+        base[[3, 4]] = True
+        native = np.ones(19, dtype=np.bool_)
+        native[[3, 4]] = False
+        survival = np.zeros(19, dtype=np.uint8)
+        survival[[3, 4]] = [2, 4]
+        mask, intervened = AuditedRegularBulletShield(
+            horizon_frames=6, least_risk_fallback=True
+        ).apply(_FakeRawFrame(native, survival=survival.tobytes()), base)
+        self.assertEqual(np.flatnonzero(mask).tolist(), [4])
+        self.assertTrue(intervened)
+
 
 class DeathbombShieldTest(unittest.TestCase):
     def test_forces_bomb_inside_window(self):

@@ -161,12 +161,17 @@ class AuditedRegularBulletShield:
         if not combined.any():
             if not self.least_risk_fallback:
                 return base_mask.copy(), False
-            survival = np.asarray(
-                raw_frame.regular_bullet_action_survival_frames(
-                    self.horizon_frames, self.extra_margin_px
-                ),
-                dtype=np.int16,
+            native_survival = raw_frame.regular_bullet_action_survival_frames(
+                self.horizon_frames, self.extra_margin_px
             )
+            # PyO3 intentionally exposes Vec<u8> through the buffer protocol.
+            # Fake/test adapters may instead return an ordinary integer list.
+            if isinstance(native_survival, (bytes, bytearray, memoryview)):
+                survival = np.frombuffer(native_survival, dtype=np.uint8).astype(
+                    np.int16
+                )
+            else:
+                survival = np.asarray(native_survival, dtype=np.int16)
             if survival.shape != base_mask.shape:
                 raise ValueError(
                     "native regular-bullet survival vector has the wrong shape"
