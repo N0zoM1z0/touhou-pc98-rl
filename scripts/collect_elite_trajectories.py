@@ -56,15 +56,20 @@ def _collect(task: tuple) -> dict:
     actions: list[int] = []
     masks: list[np.ndarray] = []
     policy_valid: list[bool] = []
+    safety_events: list[bool] = []
+    miss_events: list[bool] = []
     deaths = 0
     bombs_used = 0
     success = False
+    terminal_observed = False
     end_flag = 0
     try:
         observation, info = env.reset(seed=seed)
         previous_bombs = int(round(float(observation[10]) * 8.0))
         for step in range(steps):
-            action_mask, _ = deathbomb.apply(info["raw_frame"], info["action_mask"])
+            action_mask, preemption = deathbomb.apply(
+                info["raw_frame"], info["action_mask"]
+            )
             action_mask, _ = regular.apply(info["raw_frame"], action_mask)
             with torch.no_grad():
                 logits, _, hidden = model.forward_step(
@@ -82,6 +87,8 @@ def _collect(task: tuple) -> dict:
             next_observation, _, terminal, truncated, next_info = env.step(action)
             online_override = bool(next_info.get("deathbomb_intervention", False))
             policy_valid.append(not (online_override and action != 18) and action != 18)
+            safety_events.append(preemption or online_override)
+            miss_events.append(bool(next_info["miss_event"]))
             current_bombs = int(round(float(next_observation[10]) * 8.0))
             bombs_used += max(previous_bombs - current_bombs, 0)
             previous_bombs = current_bombs
@@ -90,6 +97,7 @@ def _collect(task: tuple) -> dict:
             info = next_info
             end_flag = int(info["end_flag"])
             if terminal or truncated:
+                terminal_observed = bool(terminal)
                 success = end_flag == 2
                 break
     finally:
@@ -106,9 +114,12 @@ def _collect(task: tuple) -> dict:
             actions=np.asarray(actions, dtype=np.int64),
             action_masks=np.asarray(masks, dtype=np.bool_),
             policy_valid=np.asarray(policy_valid, dtype=np.bool_),
+            safety_events=np.asarray(safety_events, dtype=np.bool_),
+            miss_events=np.asarray(miss_events, dtype=np.bool_),
             bombs_used=np.asarray(bombs_used, dtype=np.int64),
             deaths=np.asarray(deaths, dtype=np.int64),
             success=np.asarray(success, dtype=np.bool_),
+            terminal=np.asarray(terminal_observed, dtype=np.bool_),
             no_miss_success=np.asarray(elite, dtype=np.bool_),
             end_flag=np.asarray(end_flag, dtype=np.int64),
             step_limit=np.asarray(steps, dtype=np.int64),
