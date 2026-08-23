@@ -8,6 +8,7 @@ from scripts.collect_counterfactual_branches import (
     DATASET_FORMAT,
     _anchor_arrays,
     _write_dataset,
+    movement_mask,
 )
 
 
@@ -20,6 +21,14 @@ def _outcome(action, collision=None, kind=None):
 
 
 class CounterfactualCollectionTest(unittest.TestCase):
+    def test_movement_mask_always_excludes_bomb_for_nmnb(self):
+        class Shield:
+            def apply(self, raw_frame, mask):
+                return mask, False
+
+        mask, _ = movement_mask(Shield(), object(), np.ones(19, dtype=np.bool_))
+        self.assertFalse(bool(mask[18]))
+
     def test_anchor_arrays_distinguish_illegal_safe_and_collision(self):
         anchor = {
             "outcomes": [

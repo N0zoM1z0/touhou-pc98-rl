@@ -28,6 +28,7 @@ def _comparison_task(task: tuple) -> tuple[dict, dict]:
         seed,
         baseline_geometry,
         baseline_safety,
+        allow_bombs,
     ) = task
     baseline = evaluate(
         image=image,
@@ -38,6 +39,7 @@ def _comparison_task(task: tuple) -> tuple[dict, dict]:
         seed=seed,
         analytic_geometry=baseline_geometry,
         hard_safety=baseline_safety,
+        allow_bombs=allow_bombs,
     )
     checkpoint_result = evaluate(
         image=image,
@@ -46,6 +48,7 @@ def _comparison_task(task: tuple) -> tuple[dict, dict]:
         deterministic=deterministic,
         steps=steps,
         seed=seed,
+        allow_bombs=allow_bombs,
     )
     return baseline, checkpoint_result
 
@@ -66,6 +69,9 @@ def summarize(evaluations: list[dict]) -> dict:
         "successes": int(sum(evaluation["success"] for evaluation in evaluations)),
         "no_miss_successes": int(
             sum(evaluation.get("no_miss_success", False) for evaluation in evaluations)
+        ),
+        "nmnb_successes": int(
+            sum(evaluation.get("nmnb_success", False) for evaluation in evaluations)
         ),
         "mean_raw_reward": np.mean(
             [evaluation["raw_reward"] for evaluation in evaluations], axis=0
@@ -89,6 +95,11 @@ def main() -> None:
     parser.add_argument("--steps", type=int, default=1_200)
     parser.add_argument("--jobs", type=int, default=1)
     parser.add_argument("--deterministic", action="store_true")
+    parser.add_argument(
+        "--allow-bombs",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+    )
     parser.add_argument("--report", default="runs/pc98rl/policy_comparison.json")
     args = parser.parse_args()
 
@@ -124,6 +135,7 @@ def main() -> None:
             seed,
             baseline_geometry,
             baseline_safety,
+            args.allow_bombs,
         )
         for seed in args.seeds
     ]
@@ -158,6 +170,7 @@ def main() -> None:
         "steps": args.steps,
         "jobs": args.jobs,
         "deterministic": args.deterministic,
+        "allow_bombs": args.allow_bombs,
         "baseline_policy": baseline_policy,
         "baseline_checkpoint": (
             str(Path(args.baseline_checkpoint).resolve())

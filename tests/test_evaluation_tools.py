@@ -18,6 +18,21 @@ class EvaluationSummaryTest(unittest.TestCase):
         }
         self.assertGreater(candidate_rank(perfect), candidate_rank(higher_return))
 
+    def test_checkpoint_rank_prefers_nmnb_over_bomb_assisted_clear(self):
+        nmnb = {
+            "successes": 1,
+            "no_miss_successes": 1,
+            "nmnb_successes": 1,
+            "selection_score": -1.0,
+        }
+        bomb_assisted = {
+            "successes": 4,
+            "no_miss_successes": 4,
+            "nmnb_successes": 0,
+            "selection_score": 10.0,
+        }
+        self.assertGreater(candidate_rank(nmnb), candidate_rank(bomb_assisted))
+
     def test_checkpoint_rank_prefers_more_no_miss_over_more_raw_clears(self):
         safer = {
             "successes": 7,
@@ -65,6 +80,16 @@ class EvaluationSummaryTest(unittest.TestCase):
                 arguments, {"deathbomb_safety": True}
             ),
             {},
+        )
+
+    def test_no_bomb_runtime_mismatch_is_audited(self):
+        arguments = [{"allow_bombs": True}, {"allow_bombs": False}]
+        self.assertEqual(
+            runtime_config_mismatches(arguments, {}),
+            {"allow_bombs": [True, False]},
+        )
+        self.assertEqual(
+            runtime_config_mismatches(arguments, {"allow_bombs": False}), {}
         )
 
 

@@ -37,6 +37,28 @@ def deployment_checkpoint(
         if source_checkpoint is not None:
             provenance["source_checkpoint"] = Path(source_checkpoint).name
 
+    counterfactual_provenance = copy.deepcopy(
+        saved.get("counterfactual_distillation")
+    )
+    if counterfactual_provenance is not None:
+        train_trajectories = counterfactual_provenance.pop(
+            "train_trajectories", []
+        )
+        selection_trajectories = counterfactual_provenance.pop(
+            "selection_trajectories", []
+        )
+        source_checkpoint = counterfactual_provenance.pop("source", None)
+        counterfactual_provenance["train_trajectory_count"] = len(
+            train_trajectories
+        )
+        counterfactual_provenance["selection_trajectory_count"] = len(
+            selection_trajectories
+        )
+        if source_checkpoint is not None:
+            counterfactual_provenance["source_checkpoint"] = Path(
+                source_checkpoint
+            ).name
+
     deployment = {
         "format": "pc98rl-online-actor-v1",
         "source_checkpoint": source.name,
@@ -55,6 +77,8 @@ def deployment_checkpoint(
     }
     if provenance is not None:
         result["future_safety_distillation"] = provenance
+    if counterfactual_provenance is not None:
+        result["counterfactual_distillation"] = counterfactual_provenance
     return result
 
 

@@ -14,12 +14,10 @@ import numpy as np
 import torch
 
 from pc98rl.distributions import MaskedCategorical
+from pc98rl.counterfactual import DATASET_FORMAT
 from pc98rl.env import TH05CPUEnv, TH05_KINEMATICS
 from pc98rl.model import EntityActorCritic
-from pc98rl.safety import AuditedRegularBulletShield, DeathbombShield
-
-
-DATASET_FORMAT = "pc98rl-counterfactual-trajectory-v1"
+from pc98rl.safety import AuditedRegularBulletShield
 
 
 def decode_survival_frames(raw_frame: Any, horizon: int) -> np.ndarray:
@@ -231,10 +229,9 @@ def collect_trajectory(task: dict[str, Any]) -> dict[str, Any]:
     continuation_shield = AuditedRegularBulletShield(
         horizon_frames=int(task["continuation_horizon"])
     )
-    deathbomb = DeathbombShield()
     env = TH05CPUEnv(
         task["image"],
-        deathbomb_guard=True,
+        deathbomb_guard=False,
         enable_state_branching=True,
     )
     anchors: list[dict[str, Any]] = []
@@ -249,9 +246,8 @@ def collect_trajectory(task: dict[str, Any]) -> dict[str, Any]:
         for search_decision in range(int(task["search_decisions"])):
             completed_decisions = search_decision + 1
             base_mask = np.asarray(info["action_mask"], dtype=np.bool_)
-            runtime_mask, _ = deathbomb.apply(info["raw_frame"], base_mask)
             runtime_mask, _ = movement_mask(
-                continuation_shield, info["raw_frame"], runtime_mask
+                continuation_shield, info["raw_frame"], base_mask
             )
             behavior_action, next_hidden, _ = actor_step(
                 model,
@@ -276,14 +272,14 @@ def collect_trajectory(task: dict[str, Any]) -> dict[str, Any]:
                     anchor_info["raw_frame"],
                     anchor_info["action_mask"],
                 )
-                if anchor_unsafe >= int(task["min_unsafe_actions"]):
-                    anchor_runtime_mask, _ = deathbomb.apply(
-                        anchor_info["raw_frame"], anchor_info["action_mask"]
-                    )
+                if (
+                    anchor_unsafe >= int(task["min_unsafe_actions"])
+                    and not bool(anchor_info["raw_frame"].deathbomb_window_active())
+                ):
                     anchor_runtime_mask, _ = movement_mask(
                         continuation_shield,
                         anchor_info["raw_frame"],
-                        anchor_runtime_mask,
+                        anchor_info["action_mask"],
                     )
                     behavior_action, anchor_next_hidden, behavior_logits = actor_step(
                         model,
@@ -402,6 +398,9 @@ def collect_trajectory(task: dict[str, Any]) -> dict[str, Any]:
     report = {
         "format": DATASET_FORMAT,
         "cpu_only": True,
+        "nmnb": True,
+        "bomb_action_masked": True,
+        "deathbomb_guard": False,
         "online_modules_added": 0,
         "image": task["image"],
         "checkpoint": task["checkpoint"],
@@ -469,6 +468,11 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=1601)
     parser.add_argument("--seeds", type=int, nargs="+")
     parser.add_argument("--jobs", type=int, default=1)
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="reuse complete per-seed JSON/NPZ pairs after an interrupted collection",
+    )
     args = parser.parse_args()
 
     if args.safety_horizon is not None:
@@ -494,7 +498,7 @@ def main() -> None:
             parser.error("use --output-dir/--report instead of --output/--dataset")
         output_dir = Path(args.output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
-        if any(output_dir.iterdir()):
+        if any(output_dir.iterdir()) and not args.resume:
             parser.error("output directory must be empty")
     else:
         if not args.output:
@@ -502,10 +506,16 @@ def main() -> None:
         output_dir = Path(args.output).parent
 
     tasks = []
+    trajectories = []
     for seed in seeds:
         if multi:
             output = output_dir / f"seed_{seed}.json"
             dataset = output_dir / f"seed_{seed}.npz"
+            if output.exists() or dataset.exists():
+                if not args.resume or not output.is_file() or not dataset.is_file():
+                    parser.error(f"incomplete or unexpected existing output for seed {seed}")
+                trajectories.append(json.loads(output.read_text(encoding="utf-8")))
+                continue
         else:
             output = Path(args.output)
             dataset = Path(args.dataset) if args.dataset else output.with_suffix(".npz")
@@ -535,7 +545,6 @@ def main() -> None:
     else:
         executor = concurrent.futures.ProcessPoolExecutor(max_workers=args.jobs)
         results = executor.map(collect_trajectory, tasks)
-    trajectories = []
     try:
         for result in results:
             trajectories.append(result)
@@ -566,6 +575,9 @@ def main() -> None:
             ),
             "format": DATASET_FORMAT,
             "cpu_only": True,
+            "nmnb": True,
+            "bomb_action_masked": True,
+            "deathbomb_guard": False,
             "online_modules_added": 0,
             "image": args.image,
             "checkpoint": args.checkpoint,

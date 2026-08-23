@@ -39,6 +39,7 @@ def evaluate(
     regular_bullet_safety_margin: float | None = None,
     regular_bullet_least_risk_fallback: bool | None = None,
     deathbomb_safety: bool | None = None,
+    allow_bombs: bool | None = None,
 ) -> dict:
     """Run one fixed-seed episode prefix and return JSON-serializable metrics."""
     rng = np.random.default_rng(seed)
@@ -89,6 +90,8 @@ def evaluate(
                 deathbomb_safety = bool(
                     saved.get("args", {}).get("deathbomb_safety", False)
                 )
+            if allow_bombs is None:
+                allow_bombs = bool(saved.get("args", {}).get("allow_bombs", True))
         torch.manual_seed(seed)
         model = EntityActorCritic(
             analytic_geometry=analytic_geometry,
@@ -111,6 +114,12 @@ def evaluate(
         regular_bullet_least_risk_fallback = False
     if deathbomb_safety is None:
         deathbomb_safety = False
+    if allow_bombs is None:
+        allow_bombs = True
+    if not allow_bombs and deathbomb_safety:
+        raise ValueError("NMNB evaluation cannot enable deathbomb safety")
+    if not allow_bombs and emergency_bomb_clearance > 0.0:
+        raise ValueError("NMNB evaluation cannot enable emergency bombs")
     regular_bullet_shield = (
         AuditedRegularBulletShield(
             horizon_frames=regular_bullet_safety_horizon,
@@ -158,8 +167,11 @@ def evaluate(
                 if hard_safety
                 or regular_bullet_shield is not None
                 or deathbomb_shield is not None
+                or not allow_bombs
                 else np.ones_like(action_mask, dtype=np.bool_)
             )
+            if not allow_bombs:
+                effective_action_mask[18] = False
             if deathbomb_shield is not None:
                 effective_action_mask, deathbomb_intervention = deathbomb_shield.apply(
                     raw_frame, effective_action_mask
@@ -183,6 +195,7 @@ def evaluate(
                     or bomb_shield is not None
                     or regular_bullet_shield is not None
                     or deathbomb_shield is not None
+                    or not allow_bombs
                 ):
                     valid_actions = np.flatnonzero(effective_action_mask)
                     action = int(rng.choice(valid_actions))
@@ -206,6 +219,7 @@ def evaluate(
                             or bomb_shield is not None
                             or regular_bullet_shield is not None
                             or deathbomb_shield is not None
+                            or not allow_bombs
                             else None
                         ),
                     )
@@ -249,6 +263,7 @@ def evaluate(
         env.close()
 
     success = end_flag == 2
+    bomb_actions = int(action_counts[18])
     return {
         "policy": policy,
         "seed": seed,
@@ -261,6 +276,10 @@ def evaluate(
         "terminal": bool(terminal),
         "success": success,
         "no_miss_success": success and deaths == 0,
+        "allow_bombs": allow_bombs,
+        "bomb_actions": bomb_actions,
+        "no_bomb_success": success and bomb_actions == 0,
+        "nmnb_success": success and deaths == 0 and bomb_actions == 0,
         "end_flag": end_flag,
         "scenario": scenario,
         "analytic_geometry": analytic_geometry if model is not None else None,
@@ -332,6 +351,11 @@ def main() -> None:
         action=argparse.BooleanOptionalAction,
         default=None,
     )
+    parser.add_argument(
+        "--allow-bombs",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+    )
     parser.add_argument("--steps", type=int, default=1_200)
     parser.add_argument("--seed", type=int, default=20260822)
     args = parser.parse_args()
@@ -352,6 +376,7 @@ def main() -> None:
             args.regular_bullet_least_risk_fallback
         ),
         deathbomb_safety=args.deathbomb_safety,
+        allow_bombs=args.allow_bombs,
     )
     print(json.dumps(result, sort_keys=True), flush=True)
 

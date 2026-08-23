@@ -22,6 +22,12 @@ class DeploymentCheckpointTest(unittest.TestCase):
                     "trajectories": ["private/a.npz", "private/b.npz"],
                     "epoch": 4,
                 },
+                "counterfactual_distillation": {
+                    "source": "private/source.pt",
+                    "train_trajectories": ["private/train-a.npz"],
+                    "selection_trajectories": ["private/select-a.npz"],
+                    "epoch": 3,
+                },
             }
             result = deployment_checkpoint(
                 saved,
@@ -38,6 +44,12 @@ class DeploymentCheckpointTest(unittest.TestCase):
         )
         self.assertTrue(result["args"]["regular_bullet_least_risk_fallback"])
         self.assertTrue(result["deployment"]["offline_teacher_stripped"])
+        counterfactual = result["counterfactual_distillation"]
+        self.assertNotIn("train_trajectories", counterfactual)
+        self.assertNotIn("selection_trajectories", counterfactual)
+        self.assertEqual(counterfactual["train_trajectory_count"], 1)
+        self.assertEqual(counterfactual["selection_trajectory_count"], 1)
+        self.assertEqual(counterfactual["source_checkpoint"], "source.pt")
 
 
 if __name__ == "__main__":

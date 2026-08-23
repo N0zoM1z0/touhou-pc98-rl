@@ -37,6 +37,7 @@ def _worker_main(
     regular_bullet_safety_horizon: int,
     regular_bullet_safety_margin: float,
     deathbomb_safety: bool,
+    allow_bombs: bool,
 ) -> None:
     """Own one DOSBox-X process and keep all emulator work off the trainer."""
     torch.set_num_threads(1)
@@ -47,7 +48,7 @@ def _worker_main(
     env = TH05CPUEnv(
         image,
         frame_interval_s=frame_interval_s,
-        deathbomb_guard=deathbomb_safety,
+        deathbomb_guard=deathbomb_safety and allow_bombs,
     )
     regular_bullet_shield = (
         AuditedRegularBulletShield(
@@ -57,7 +58,7 @@ def _worker_main(
         if regular_bullet_safety_horizon > 0
         else None
     )
-    deathbomb_shield = DeathbombShield() if deathbomb_safety else None
+    deathbomb_shield = DeathbombShield() if deathbomb_safety and allow_bombs else None
 
     def action_mask_from_info(info):
         action_mask = info["action_mask"]
@@ -74,6 +75,9 @@ def _worker_main(
             action_mask, regular_intervention = regular_bullet_shield.apply(
                 info["raw_frame"], action_mask
             )
+        if not allow_bombs:
+            action_mask = np.asarray(action_mask, dtype=np.bool_).copy()
+            action_mask[18] = False
         return action_mask, regular_intervention, deathbomb_intervention
 
     try:
@@ -153,6 +157,7 @@ class WorkerPool:
         regular_bullet_safety_horizon: int = 0,
         regular_bullet_safety_margin: float = 0.0,
         deathbomb_safety: bool = False,
+        allow_bombs: bool = True,
     ):
         context = mp.get_context("spawn")
         self.timeout_s = timeout_s
@@ -170,6 +175,7 @@ class WorkerPool:
                     regular_bullet_safety_horizon,
                     regular_bullet_safety_margin,
                     deathbomb_safety,
+                    allow_bombs,
                 ),
                 daemon=True,
             )
@@ -469,6 +475,10 @@ def train(args: argparse.Namespace) -> None:
         raise ValueError("emergency-bomb-clearance must be non-negative")
     if args.emergency_bomb_horizon <= 0.0:
         raise ValueError("emergency-bomb-horizon must be positive")
+    if not args.allow_bombs and (
+        args.deathbomb_safety or args.emergency_bomb_clearance > 0.0
+    ):
+        raise ValueError("NMNB training cannot enable an automatic bomb mechanism")
     if not 0 <= args.regular_bullet_safety_horizon <= 16:
         raise ValueError("regular-bullet-safety-horizon must be between 0 and 16")
     if (
@@ -568,6 +578,11 @@ def train(args: argparse.Namespace) -> None:
         )
         if saved_deathbomb_safety != args.deathbomb_safety:
             raise ValueError("deathbomb safety setting must match when resuming")
+        saved_allow_bombs = bool(
+            resume_checkpoint.get("args", {}).get("allow_bombs", True)
+        )
+        if saved_allow_bombs != args.allow_bombs:
+            raise ValueError("allow-bombs setting must match when resuming")
         saved_risk_enabled = resume_checkpoint.get("future_miss_head") is not None
         if saved_risk_enabled != risk_enabled:
             raise ValueError(
@@ -615,6 +630,7 @@ def train(args: argparse.Namespace) -> None:
         args.regular_bullet_safety_horizon,
         args.regular_bullet_safety_margin,
         args.deathbomb_safety,
+        args.allow_bombs,
     )
     observation = pool.observations
     action_mask = pool.action_masks
@@ -677,8 +693,11 @@ def train(args: argparse.Namespace) -> None:
                     if args.hard_safety
                     or args.regular_bullet_safety_horizon > 0
                     or args.deathbomb_safety
+                    or not args.allow_bombs
                     else np.ones_like(action_mask, dtype=np.bool_)
                 )
+                if not args.allow_bombs:
+                    effective_action_mask[:, 18] = False
                 regular_bullet_interventions += int(
                     np.count_nonzero(pool.regular_bullet_interventions)
                 )
@@ -962,6 +981,7 @@ def train(args: argparse.Namespace) -> None:
                 "regular_bullet_safety_margin": args.regular_bullet_safety_margin,
                 "regular_bullet_interventions": regular_bullet_interventions,
                 "deathbomb_safety": args.deathbomb_safety,
+                "allow_bombs": args.allow_bombs,
                 "deathbomb_interventions": deathbomb_interventions,
                 "online_deathbomb_overrides": online_deathbomb_overrides,
                 "policy_valid_fraction": round(float(policy_valid.mean()), 6),
@@ -982,6 +1002,7 @@ def train(args: argparse.Namespace) -> None:
                     or bomb_shield is not None
                     or args.regular_bullet_safety_horizon > 0
                     or args.deathbomb_safety
+                    or not args.allow_bombs
                     else 0.0,
                     6,
                 ),
@@ -991,6 +1012,7 @@ def train(args: argparse.Namespace) -> None:
                     or bomb_shield is not None
                     or args.regular_bullet_safety_horizon > 0
                     or args.deathbomb_safety
+                    or not args.allow_bombs
                     else 0.0,
                     6,
                 ),
@@ -1105,6 +1127,12 @@ def parse_args() -> argparse.Namespace:
         "--deathbomb-safety",
         action="store_true",
         help="reserve bombs and force one during TH05's audited eight-frame deathbomb window",
+    )
+    parser.add_argument(
+        "--allow-bombs",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="include bomb action 18; disable for NMNB training",
     )
     parser.add_argument(
         "--objective-weights",

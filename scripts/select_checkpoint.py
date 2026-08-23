@@ -26,6 +26,7 @@ RUNTIME_DEFAULTS = {
     "regular_bullet_safety_margin": 0.0,
     "regular_bullet_least_risk_fallback": False,
     "deathbomb_safety": False,
+    "allow_bombs": True,
 }
 
 
@@ -58,6 +59,7 @@ def _evaluate_task(task: tuple) -> tuple[str, dict]:
         regular_bullet_safety_margin,
         regular_bullet_least_risk_fallback,
         deathbomb_safety,
+        allow_bombs,
     ) = task
     result = evaluate(
         image=image,
@@ -73,14 +75,15 @@ def _evaluate_task(task: tuple) -> tuple[str, dict]:
         regular_bullet_safety_margin=regular_bullet_safety_margin,
         regular_bullet_least_risk_fallback=regular_bullet_least_risk_fallback,
         deathbomb_safety=deathbomb_safety,
+        allow_bombs=allow_bombs,
     )
     return snapshot, result
 
 
 def candidate_rank(candidate: dict) -> tuple[int, int, float]:
-    """Order policies by perfect completion, any completion, then stable return."""
+    """Order policies by NMNB completion, any completion, then stable return."""
     return (
-        int(candidate["no_miss_successes"]),
+        int(candidate.get("nmnb_successes", candidate["no_miss_successes"])),
         int(candidate["successes"]),
         float(candidate["selection_score"]),
     )
@@ -114,6 +117,11 @@ def main() -> None:
     )
     parser.add_argument(
         "--deathbomb-safety",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+    )
+    parser.add_argument(
+        "--allow-bombs",
         action=argparse.BooleanOptionalAction,
         default=None,
     )
@@ -152,6 +160,7 @@ def main() -> None:
             args.regular_bullet_least_risk_fallback
         ),
         "deathbomb_safety": args.deathbomb_safety,
+        "allow_bombs": args.allow_bombs,
     }
     mismatches = runtime_config_mismatches(
         checkpoint_arguments, runtime_overrides
@@ -183,6 +192,7 @@ def main() -> None:
             args.regular_bullet_safety_margin,
             args.regular_bullet_least_risk_fallback,
             args.deathbomb_safety,
+            args.allow_bombs,
         )
         for snapshot in snapshot_strings
         for seed in args.seeds
@@ -221,11 +231,14 @@ def main() -> None:
             "no_miss_successes": int(
                 sum(evaluation["no_miss_success"] for evaluation in evaluations)
             ),
+            "nmnb_successes": int(
+                sum(evaluation.get("nmnb_success", False) for evaluation in evaluations)
+            ),
             "evaluations": evaluations,
         }
         candidates.append(candidate)
 
-    # A no-miss clear is the primary deployment objective. Ordinary completion
+    # An NMNB clear is the primary deployment objective. Ordinary completion
     # and lower-confidence-bound return only break ties between perfect clears.
     best = max(candidates, key=candidate_rank)
     report = {
@@ -242,6 +255,7 @@ def main() -> None:
             args.regular_bullet_least_risk_fallback
         ),
         "deathbomb_safety": args.deathbomb_safety,
+        "allow_bombs": args.allow_bombs,
         "allow_runtime_config_comparison": args.allow_runtime_config_comparison,
         "lcb_z": args.lcb_z,
         "selected": best["snapshot"],

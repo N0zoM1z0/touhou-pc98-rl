@@ -25,6 +25,12 @@ def main() -> None:
         action=argparse.BooleanOptionalAction,
         default=None,
     )
+    parser.add_argument(
+        "--allow-bombs", action=argparse.BooleanOptionalAction, default=None
+    )
+    parser.add_argument(
+        "--deathbomb-safety", action=argparse.BooleanOptionalAction, default=None
+    )
     args = parser.parse_args()
     source = Path(args.checkpoint)
     output = Path(args.output)
@@ -46,7 +52,18 @@ def main() -> None:
         overrides["regular_bullet_least_risk_fallback"] = (
             args.regular_bullet_least_risk_fallback
         )
+    if args.allow_bombs is not None:
+        overrides["allow_bombs"] = args.allow_bombs
+    if args.deathbomb_safety is not None:
+        overrides["deathbomb_safety"] = args.deathbomb_safety
     saved = torch.load(source, map_location="cpu", weights_only=False)
+    effective_arguments = dict(saved.get("args", {}))
+    effective_arguments.update(overrides)
+    if not bool(effective_arguments.get("allow_bombs", True)) and (
+        bool(effective_arguments.get("deathbomb_safety", False))
+        or float(effective_arguments.get("emergency_bomb_clearance", 0.0)) > 0.0
+    ):
+        parser.error("NMNB export cannot enable an automatic bomb mechanism")
     exported = deployment_checkpoint(
         saved, source=source, argument_overrides=overrides
     )
