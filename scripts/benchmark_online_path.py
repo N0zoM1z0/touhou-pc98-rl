@@ -42,6 +42,9 @@ def main() -> None:
     parser.add_argument(
         "--regular-bullet-least-risk-fallback", action="store_true"
     )
+    parser.add_argument(
+        "--allow-bombs", action=argparse.BooleanOptionalAction, default=None
+    )
     parser.add_argument("--report")
     args = parser.parse_args()
     if args.iterations < 1 or args.warmup < 0:
@@ -55,6 +58,14 @@ def main() -> None:
     torch.manual_seed(args.seed)
     checkpoint_path = Path(args.checkpoint)
     saved = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    allow_bombs = (
+        bool(saved.get("args", {}).get("allow_bombs", True))
+        if args.allow_bombs is None
+        else args.allow_bombs
+    )
+    deathbomb_safety = bool(
+        allow_bombs and saved.get("args", {}).get("deathbomb_safety", False)
+    )
     analytic_geometry = bool(saved.get("args", {}).get("analytic_geometry", False))
     model = EntityActorCritic(
         analytic_geometry=analytic_geometry,
@@ -67,8 +78,8 @@ def main() -> None:
         extra_margin_px=args.regular_bullet_safety_margin,
         least_risk_fallback=args.regular_bullet_least_risk_fallback,
     )
-    deathbomb = DeathbombShield()
-    env = TH05CPUEnv(args.image, deathbomb_guard=True)
+    deathbomb = DeathbombShield() if deathbomb_safety else None
+    env = TH05CPUEnv(args.image, deathbomb_guard=deathbomb_safety)
     shield_latencies: list[float] = []
     policy_latencies: list[float] = []
     total_latencies: list[float] = []
@@ -81,8 +92,12 @@ def main() -> None:
             for iteration in range(args.warmup + args.iterations):
                 total_started = time.perf_counter_ns()
                 shield_started = total_started
-                action_mask, _ = deathbomb.apply(raw_frame, native_action_mask)
+                action_mask = native_action_mask.copy()
+                if deathbomb is not None:
+                    action_mask, _ = deathbomb.apply(raw_frame, action_mask)
                 action_mask, _ = regular.apply(raw_frame, action_mask)
+                if not allow_bombs:
+                    action_mask[18] = False
                 shield_finished = time.perf_counter_ns()
                 logits, _, hidden = model.forward_step(observation_tensor, hidden)
                 distribution = MaskedCategorical(
@@ -126,7 +141,8 @@ def main() -> None:
         "regular_bullet_least_risk_fallback": (
             args.regular_bullet_least_risk_fallback
         ),
-        "deathbomb_safety": True,
+        "allow_bombs": allow_bombs,
+        "deathbomb_safety": deathbomb_safety,
     }
     if args.report:
         report_path = Path(args.report)
