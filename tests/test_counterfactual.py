@@ -7,6 +7,8 @@ import torch
 
 from pc98rl.counterfactual import (
     DATASET_FORMAT,
+    balanced_binary_risk_loss,
+    binary_risk_metrics,
     counterfactual_policy_metrics,
     load_counterfactual_group,
     validate_disjoint_groups,
@@ -31,6 +33,22 @@ def _dataset(path: Path, trajectory_id: str, risky_action: int = 0):
 
 
 class CounterfactualDatasetTest(unittest.TestCase):
+    def test_binary_risk_metrics_reward_correct_ranking(self):
+        probabilities = torch.tensor([[0.9, 0.1, 0.8, 0.2]])
+        targets = torch.tensor([[1.0, 0.0, 1.0, 0.0]])
+        valid = torch.ones_like(targets, dtype=torch.bool)
+        metrics = binary_risk_metrics(probabilities, targets, valid)
+        self.assertEqual(metrics["roc_auc"], 1.0)
+        self.assertEqual(metrics["average_precision"], 1.0)
+        self.assertEqual(metrics["balanced_accuracy"], 1.0)
+
+    def test_balanced_risk_loss_requires_both_classes(self):
+        logits = torch.zeros(1, 3)
+        targets = torch.zeros_like(logits)
+        valid = torch.ones_like(logits, dtype=torch.bool)
+        with self.assertRaisesRegex(ValueError, "both collision classes"):
+            balanced_binary_risk_loss(logits, targets, valid)
+
     def test_load_and_policy_metrics(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "one.npz"

@@ -156,9 +156,67 @@ def counterfactual_policy_metrics(
     }
 
 
+def balanced_binary_risk_loss(
+    logits: torch.Tensor,
+    targets: torch.Tensor,
+    valid: torch.Tensor,
+) -> torch.Tensor:
+    """Give colliding and safe branch labels equal aggregate weight."""
+    if logits.shape != targets.shape or logits.shape != valid.shape:
+        raise ValueError("risk logits, targets, and valid mask must match")
+    positive = valid & (targets > 0.5)
+    negative = valid & ~positive
+    if not torch.any(positive) or not torch.any(negative):
+        raise ValueError("balanced risk loss requires both collision classes")
+    losses = F.binary_cross_entropy_with_logits(logits, targets, reduction="none")
+    return 0.5 * (losses[positive].mean() + losses[negative].mean())
+
+
+def binary_risk_metrics(
+    probabilities: torch.Tensor,
+    targets: torch.Tensor,
+    valid: torch.Tensor,
+) -> dict[str, float]:
+    """Return threshold and ranking metrics over legal counterfactual actions."""
+    if probabilities.shape != targets.shape or probabilities.shape != valid.shape:
+        raise ValueError("risk probabilities, targets, and valid mask must match")
+    scores = probabilities[valid].detach().cpu().numpy().astype(np.float64)
+    labels = (targets[valid].detach().cpu().numpy() > 0.5)
+    positives = scores[labels]
+    negatives = scores[~labels]
+    if not len(positives) or not len(negatives):
+        raise ValueError("risk metrics require both collision classes")
+    auc = float(
+        (
+            (positives[:, None] > negatives[None, :]).sum()
+            + 0.5 * (positives[:, None] == negatives[None, :]).sum()
+        )
+        / (len(positives) * len(negatives))
+    )
+    order = np.argsort(-scores, kind="stable")
+    sorted_labels = labels[order]
+    precision = np.cumsum(sorted_labels) / np.arange(1, len(labels) + 1)
+    average_precision = float(precision[sorted_labels].mean())
+    predicted = scores >= 0.5
+    true_positive_rate = float(predicted[labels].mean())
+    true_negative_rate = float((~predicted[~labels]).mean())
+    return {
+        "roc_auc": auc,
+        "average_precision": average_precision,
+        "balanced_accuracy": 0.5 * (true_positive_rate + true_negative_rate),
+        "brier": float(np.mean((scores - labels.astype(np.float64)) ** 2)),
+        "mean_positive_probability": float(positives.mean()),
+        "mean_negative_probability": float(negatives.mean()),
+        "positive_fraction": float(labels.mean()),
+        "labels": int(len(labels)),
+    }
+
+
 __all__ = [
     "CounterfactualGroup",
     "DATASET_FORMAT",
+    "balanced_binary_risk_loss",
+    "binary_risk_metrics",
     "counterfactual_policy_metrics",
     "load_counterfactual_group",
     "validate_disjoint_groups",
