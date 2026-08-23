@@ -34,6 +34,8 @@ def actor_step(
     observation: np.ndarray,
     hidden: torch.Tensor,
     action_mask: np.ndarray,
+    *,
+    deterministic: bool = True,
 ) -> tuple[int, torch.Tensor, np.ndarray]:
     with torch.no_grad():
         logits, _, next_hidden = model.forward_step(
@@ -44,7 +46,7 @@ def actor_step(
             valid_mask=torch.from_numpy(action_mask).unsqueeze(0),
         )
     return (
-        int(distribution.mode.item()),
+        int((distribution.mode if deterministic else distribution.sample()).item()),
         next_hidden,
         logits.squeeze(0).numpy(force=True),
     )
@@ -152,6 +154,7 @@ def _write_dataset(
     continuation_horizon: int,
     continuation_decisions: int,
     native_frames: int,
+    trajectory_policy: str,
 ) -> None:
     masks_and_frames = [_anchor_arrays(anchor) for anchor in anchors]
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -199,6 +202,7 @@ def _write_dataset(
         continuation_horizon=np.asarray(continuation_horizon, dtype=np.int64),
         continuation_decisions=np.asarray(continuation_decisions, dtype=np.int64),
         native_frames=np.asarray(native_frames, dtype=np.int64),
+        trajectory_policy=np.asarray(trajectory_policy),
     )
 
 
@@ -250,7 +254,11 @@ def collect_trajectory(task: dict[str, Any]) -> dict[str, Any]:
                 continuation_shield, info["raw_frame"], runtime_mask
             )
             behavior_action, next_hidden, _ = actor_step(
-                model, observation, hidden, runtime_mask
+                model,
+                observation,
+                hidden,
+                runtime_mask,
+                deterministic=task["trajectory_policy"] == "deterministic",
             )
 
             _, unsafe_actions = movement_mask(
@@ -278,7 +286,11 @@ def collect_trajectory(task: dict[str, Any]) -> dict[str, Any]:
                         anchor_runtime_mask,
                     )
                     behavior_action, anchor_next_hidden, behavior_logits = actor_step(
-                        model, anchor_observation, hidden, anchor_runtime_mask
+                        model,
+                        anchor_observation,
+                        hidden,
+                        anchor_runtime_mask,
+                        deterministic=task["trajectory_policy"] == "deterministic",
                     )
                     survival = decode_survival_frames(
                         anchor_info["raw_frame"],
@@ -381,6 +393,7 @@ def collect_trajectory(task: dict[str, Any]) -> dict[str, Any]:
         continuation_horizon=int(task["continuation_horizon"]),
         continuation_decisions=int(task["continuation_decisions"]),
         native_frames=int(task["native_frames"]),
+        trajectory_policy=str(task["trajectory_policy"]),
     )
     for anchor in anchors:
         anchor.pop("_actor_feature", None)
@@ -399,6 +412,7 @@ def collect_trajectory(task: dict[str, Any]) -> dict[str, Any]:
         "trigger_horizon": int(task["trigger_horizon"]),
         "continuation_horizon": int(task["continuation_horizon"]),
         "continuation_decisions": int(task["continuation_decisions"]),
+        "trajectory_policy": str(task["trajectory_policy"]),
         "continuation": (
             f"deterministic actor with H{int(task['continuation_horizon'])} "
             "regular-bullet shield and no bombs"
@@ -442,6 +456,12 @@ def main() -> None:
     parser.add_argument("--max-anchors", type=int, default=4)
     parser.add_argument("--min-anchor-gap", type=int, default=24)
     parser.add_argument(
+        "--trajectory-policy",
+        choices=("deterministic", "sample"),
+        default="deterministic",
+        help="policy used only to navigate between exact branch anchors",
+    )
+    parser.add_argument(
         "--require-action-contrast",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -458,8 +478,10 @@ def main() -> None:
         parser.error("trigger and continuation horizons must be positive")
     if args.max_anchors < 1 or args.min_anchor_gap < 1:
         parser.error("max anchors and minimum anchor gap must be positive")
-    if args.jobs < 1:
-        parser.error("jobs must be positive")
+    if args.jobs != 1:
+        parser.error(
+            "exact X11 save-state input requires jobs=1 per private DISPLAY"
+        )
 
     seeds = args.seeds if args.seeds is not None else [args.seed]
     if len(set(seeds)) != len(seeds):
@@ -502,6 +524,7 @@ def main() -> None:
                 "max_anchors": args.max_anchors,
                 "min_anchor_gap": args.min_anchor_gap,
                 "require_action_contrast": args.require_action_contrast,
+                "trajectory_policy": args.trajectory_policy,
                 "seed": seed,
             }
         )
@@ -552,6 +575,7 @@ def main() -> None:
             "continuation_horizon": args.continuation_horizon,
             "max_anchors_per_trajectory": args.max_anchors,
             "require_action_contrast": args.require_action_contrast,
+            "trajectory_policy": args.trajectory_policy,
             "trajectory_count": len(trajectories),
             "anchor_count": sum(item["anchors_retained"] for item in trajectories),
             "collision_actions": sum(item["collision_actions"] for item in trajectories),

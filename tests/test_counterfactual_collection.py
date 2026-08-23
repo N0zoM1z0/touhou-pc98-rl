@@ -58,6 +58,7 @@ class CounterfactualCollectionTest(unittest.TestCase):
                 continuation_horizon=6,
                 continuation_decisions=16,
                 native_frames=2,
+                trajectory_policy="sample",
             )
             with np.load(path) as dataset:
                 self.assertEqual(str(dataset["format"]), DATASET_FORMAT)
@@ -66,6 +67,7 @@ class CounterfactualCollectionTest(unittest.TestCase):
                 self.assertEqual(dataset["behavior_logits"].shape, (1, 19))
                 self.assertEqual(dataset["collision_risk"][0, :2].tolist(), [1.0, 0.0])
                 self.assertFalse(bool(dataset["action_masks"][0, 18]))
+                self.assertEqual(str(dataset["trajectory_policy"]), "sample")
 
 
 if __name__ == "__main__":
