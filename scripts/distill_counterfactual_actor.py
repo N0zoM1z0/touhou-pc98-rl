@@ -113,6 +113,11 @@ def main() -> None:
     parser.add_argument("--selection-trajectories", nargs="+", required=True)
     parser.add_argument("--heldout-trajectories", nargs="+", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument(
+        "--student-output",
+        required=True,
+        help="best non-zero actor update retained only for diagnostic A/B",
+    )
     parser.add_argument("--snapshot-dir", required=True)
     parser.add_argument("--metrics", required=True)
     parser.add_argument("--report", required=True)
@@ -176,6 +181,8 @@ def main() -> None:
 
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
+    student_output = Path(args.student_output)
+    student_output.parent.mkdir(parents=True, exist_ok=True)
     snapshot_dir = Path(args.snapshot_dir)
     snapshot_dir.mkdir(parents=True, exist_ok=True)
     if any(snapshot_dir.iterdir()):
@@ -272,7 +279,7 @@ def main() -> None:
             metrics_file.flush()
             print(json.dumps(record, sort_keys=True), flush=True)
 
-    selected = min(
+    student = min(
         records,
         key=lambda record: (
             record["selection"]["selection_objective"],
@@ -280,10 +287,26 @@ def main() -> None:
             record["epoch"],
         ),
     )
+    baseline_candidate = {
+        "epoch": 0,
+        "snapshot": str(source),
+        "train": baseline["train"],
+        "selection": baseline["selection"],
+    }
+    selected = min(
+        [baseline_candidate, *records],
+        key=lambda record: (
+            record["selection"]["selection_objective"],
+            record["selection"]["expected_collision_risk"],
+            record["epoch"],
+        ),
+    )
     shutil.copy2(selected["snapshot"], output)
-    selected_saved = torch.load(output, map_location="cpu", weights_only=False)
-    model.load_state_dict(selected_saved["model"])
-    heldout = _rounded(
+    shutil.copy2(student["snapshot"], student_output)
+
+    student_saved = torch.load(student_output, map_location="cpu", weights_only=False)
+    model.load_state_dict(student_saved["model"])
+    student_heldout = _rounded(
         _evaluate(
             model.actor,
             groups["heldout"],
@@ -291,7 +314,6 @@ def main() -> None:
             anchor_coefficient=args.anchor_coefficient,
         )
     )
-
     changed = []
     for name, tensor in model.state_dict().items():
         if not torch.equal(tensor, source_state[name]):
@@ -300,6 +322,17 @@ def main() -> None:
                 raise RuntimeError(f"non-actor parameter changed: {name}")
     if not changed:
         raise RuntimeError("distillation did not change any actor parameter")
+
+    selected_saved = torch.load(output, map_location="cpu", weights_only=False)
+    model.load_state_dict(selected_saved["model"])
+    selected_heldout = _rounded(
+        _evaluate(
+            model.actor,
+            groups["heldout"],
+            risk_scale=args.risk_scale,
+            anchor_coefficient=args.anchor_coefficient,
+        )
+    )
     report = {
         "research_question": (
             "Can exact short-horizon action-contrastive labels improve the frozen "
@@ -335,7 +368,15 @@ def main() -> None:
         "selected_output": str(output.resolve()),
         "selected_train": selected["train"],
         "selected_selection": selected["selection"],
-        "selected_heldout": heldout,
+        "selected_heldout": selected_heldout,
+        "selection_decision": (
+            "reject actor update" if selected["epoch"] == 0 else "retain actor update"
+        ),
+        "experimental_student_epoch": student["epoch"],
+        "experimental_student_output": str(student_output.resolve()),
+        "experimental_student_train": student["train"],
+        "experimental_student_selection": student["selection"],
+        "experimental_student_heldout": student_heldout,
         "heldout_opened_after_selection": True,
         "wall_s": round(time.perf_counter() - started, 4),
     }
