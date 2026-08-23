@@ -456,6 +456,34 @@ def collect_trajectory(task: dict[str, Any]) -> dict[str, Any]:
     return report
 
 
+def collect_trajectory_with_retries(task: dict[str, Any]) -> dict[str, Any]:
+    """Restart a seed after transient emulator stalls, never after label failures."""
+    retries = int(task.get("trajectory_retries", 0))
+    for attempt in range(retries + 1):
+        try:
+            report = collect_trajectory(task)
+            report["collection_attempts"] = attempt + 1
+            Path(task["output"]).write_text(
+                json.dumps(report, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            return report
+        except TimeoutError:
+            if attempt == retries:
+                raise
+            print(
+                json.dumps(
+                    {
+                        "trajectory_id": f"seed_{int(task['seed'])}",
+                        "retry_after_timeout": attempt + 1,
+                    },
+                    sort_keys=True,
+                ),
+                flush=True,
+            )
+    raise AssertionError("unreachable")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--image", required=True)
@@ -492,6 +520,12 @@ def main() -> None:
     parser.add_argument("--seeds", type=int, nargs="+")
     parser.add_argument("--jobs", type=int, default=1)
     parser.add_argument(
+        "--trajectory-retries",
+        type=int,
+        default=2,
+        help="restart a seed after a transient emulator timeout",
+    )
+    parser.add_argument(
         "--resume",
         action="store_true",
         help="reuse complete per-seed JSON/NPZ pairs after an interrupted collection",
@@ -505,6 +539,8 @@ def main() -> None:
         parser.error("trigger and continuation horizons must be positive")
     if args.max_anchors < 1 or args.min_anchor_gap < 1:
         parser.error("max anchors and minimum anchor gap must be positive")
+    if args.trajectory_retries < 0:
+        parser.error("trajectory retries must be nonnegative")
     if args.jobs != 1:
         parser.error(
             "exact X11 save-state input requires jobs=1 per private DISPLAY"
@@ -559,15 +595,16 @@ def main() -> None:
                 "require_action_contrast": args.require_action_contrast,
                 "trajectory_policy": args.trajectory_policy,
                 "seed": seed,
+                "trajectory_retries": args.trajectory_retries,
             }
         )
 
     if args.jobs == 1:
-        results = map(collect_trajectory, tasks)
+        results = map(collect_trajectory_with_retries, tasks)
         executor = None
     else:
         executor = concurrent.futures.ProcessPoolExecutor(max_workers=args.jobs)
-        results = executor.map(collect_trajectory, tasks)
+        results = executor.map(collect_trajectory_with_retries, tasks)
     try:
         for result in results:
             trajectories.append(result)

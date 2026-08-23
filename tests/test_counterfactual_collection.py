@@ -1,6 +1,8 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import numpy as np
 
@@ -8,6 +10,7 @@ from scripts.collect_counterfactual_branches import (
     DATASET_FORMAT,
     _anchor_arrays,
     _write_dataset,
+    collect_trajectory_with_retries,
     movement_mask,
 )
 
@@ -77,6 +80,32 @@ class CounterfactualCollectionTest(unittest.TestCase):
                 self.assertEqual(dataset["collision_risk"][0, :2].tolist(), [1.0, 0.0])
                 self.assertFalse(bool(dataset["action_masks"][0, 18]))
                 self.assertEqual(str(dataset["trajectory_policy"]), "sample")
+
+    def test_collection_retries_only_transient_timeout(self):
+        attempts = 0
+
+        def transient(task):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise TimeoutError("emulator stalled")
+            Path(task["output"]).write_text("{}\n", encoding="utf-8")
+            return {"trajectory_id": "seed_7"}
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "seed_7.json"
+            with mock.patch(
+                "scripts.collect_counterfactual_branches.collect_trajectory",
+                side_effect=transient,
+            ):
+                result = collect_trajectory_with_retries(
+                    {"seed": 7, "output": str(output), "trajectory_retries": 2}
+                )
+            self.assertEqual(attempts, 2)
+            self.assertEqual(result["collection_attempts"], 2)
+            self.assertEqual(
+                json.loads(output.read_text())["collection_attempts"], 2
+            )
 
 
 if __name__ == "__main__":
