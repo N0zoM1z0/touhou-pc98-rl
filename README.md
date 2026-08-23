@@ -23,20 +23,20 @@ training/evaluation path is designed around reproducible CPU experiments.
   masks applied consistently during rollout and optimization.
 - Resident-counter miss events, an explicit miss-only training cost, and an
   experimental policy-accounted emergency-bomb mask.
-- A transactional 36-ms action path, 1-ms native deathbomb guard, and measured
-  one-thread online p99 decision latency below 1.6 ms.
+- A transactional 36-ms action path, an optional audited deathbomb guard for
+  historical ablations, and a strict NMNB mode that permanently masks bombs.
 - Offline outcome and future-safety teachers that update only the actor head,
   plus an inference-only exporter that removes optimizer and auxiliary-head
   state from deployment artifacts.
 - An offline-only DOSBox-X save-state brancher with exact guest-frame stepping;
   repeated action sequences reproduce compact and raw game state byte-for-byte.
-- Action-contrastive high-risk probes that disable training-time rescue bombs
-  and label pending hits while leaving the deployed actor unchanged.
+- Grouped multi-anchor exact counterfactual datasets, trajectory-level
+  train/selection/held-out boundaries, and actor-head-only causal distillation.
 - Eight-emulator CPU rollout at about 223 transitions/s on this host.
 
-TH01-04 are explicitly not claimed yet. The immediate target is TH05 Lunatic
-completion and then no-miss completion; cross-game transfer remains a later
-research question requiring verified per-game adapters.
+TH01-04 are explicitly not claimed yet. The immediate target is a TH05 Lunatic
+no-miss, no-bomb (NMNB) clear; cross-game transfer remains a later research
+question requiring verified per-game adapters.
 
 ## Quick start
 
@@ -58,7 +58,7 @@ make test
 CUDA_VISIBLE_DEVICES='' nice -n 10 taskset -c 0-47 \
   xvfb-run --auto-servernum uv run python -m pc98rl.ppo \
   --image external/th05-lunatic-stage1.hdi --workers 8 --threads 8 \
-  --analytic-geometry --hard-safety
+  --analytic-geometry --hard-safety --no-allow-bombs
 ```
 
 The environment discovers the repository-local DOSBox-X build automatically.
@@ -71,11 +71,14 @@ uv run python scripts/export_online_actor.py \
   --checkpoint models/distill/training-checkpoint.pt \
   --output models/deploy/online-actor.pt \
   --regular-bullet-safety-horizon 6 \
-  --no-regular-bullet-least-risk-fallback
+  --no-regular-bullet-least-risk-fallback \
+  --no-allow-bombs --no-deathbomb-safety
 ```
 
 The exported file retains the small recurrent policy and audit metadata, but
 contains no optimizer, training-only risk head, or trajectory path list.
+The evaluator reports `bomb_actions` and `nmnb_success`; NMNB checkpoints reject
+automatic bomb mechanisms instead of silently relying on them.
 
 See [CPU_RL.md](CPU_RL.md) for the full setup, benchmark methodology, honest
 short-run results, evaluation commands, known failure modes, and next research

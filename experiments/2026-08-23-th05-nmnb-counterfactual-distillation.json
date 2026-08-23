@@ -1,0 +1,163 @@
+{
+  "date": "2026-08-23",
+  "research_question": "Can exact H2-triggered action counterfactuals distilled into only the actor head improve TH05 Lunatic Stage 1 under a strict no-miss, no-bomb contract?",
+  "objective": {
+    "name": "NMNB Stage 1 clear",
+    "success_condition": "end_flag == 2 and death_events == 0 and bomb_actions == 0",
+    "cpu_only": true,
+    "gpu_used": false
+  },
+  "runtime_contract": {
+    "allow_bombs": false,
+    "bomb_action": 18,
+    "bomb_action_always_masked": true,
+    "deathbomb_safety": false,
+    "emergency_bomb_clearance": 0.0,
+    "hard_safety": true,
+    "regular_bullet_safety_horizon": 6,
+    "regular_bullet_safety_margin": 0.0,
+    "regular_bullet_least_risk_fallback": false,
+    "action_interval_ms": 36
+  },
+  "invalidated_collection": {
+    "path": "runs/counterfactual/h2-h6-deathbomb-invalid-v1",
+    "trajectories_completed_before_invalidation": 5,
+    "reason": "Trajectory navigation enabled the native deathbomb guard. Branches themselves excluded bombs, but their recurrent histories were not NMNB-clean.",
+    "action": "Moved aside and excluded before any formal split or training."
+  },
+  "counterfactual_collection": {
+    "image": "external/th05-lunatic-s1-p0-p1.hdi",
+    "source_checkpoint": "models/deploy/th05-s1-lunatic-stage1-online.pt",
+    "source_checkpoint_sha256": "773c40d971d0b112cf808885f777cf616c25ef0a6a9b3a7dc9caddd6631c68bb",
+    "dataset_format": "pc98rl-counterfactual-trajectory-v2-nmnb",
+    "trajectory_navigation": "seeded categorical source policy under H6, with bomb action masked",
+    "trigger": "H2 audited regular-bullet projection",
+    "continuation": "deterministic source actor under H6, no bombs",
+    "first_action_native_frames": 2,
+    "continuation_decisions": 16,
+    "minimum_anchor_gap_decisions": 32,
+    "maximum_anchors_per_trajectory": 3,
+    "retention_rule": "Keep an anchor only when every legal movement branch completes and at least one action collides while at least one action survives the horizon.",
+    "split_unit": "complete trajectory",
+    "observation_sha256_overlap_across_splits": 0,
+    "x11_isolation": {
+      "jobs_per_display": 1,
+      "reason": "Concurrent DOSBox-X save hotkeys on one DISPLAY caused a save archive timeout despite private save files.",
+      "parallelism_policy": "Serialize exact branching per private DISPLAY; parallelize ordinary live evaluation instead."
+    },
+    "splits": {
+      "train": {
+        "seeds": [1801, 1802, 1803, 1804, 1805, 1806],
+        "trajectories": 6,
+        "anchors": 18,
+        "collision_actions": 52,
+        "horizon_safe_actions": 248
+      },
+      "selection": {
+        "seeds": [1811, 1812, 1813],
+        "trajectories": 3,
+        "anchors": 9,
+        "collision_actions": 27,
+        "horizon_safe_actions": 117
+      },
+      "heldout": {
+        "seeds": [1821, 1822, 1823, 1824],
+        "trajectories": 4,
+        "anchors": 12,
+        "collision_actions": 52,
+        "horizon_safe_actions": 152
+      }
+    }
+  },
+  "actor_distillation": {
+    "risk_target": "binary exact collision or pending-hit outcome for each legal movement action",
+    "risk_scale": 3.0,
+    "behavior_kl_anchor": 0.5,
+    "learning_rate": 0.0001,
+    "batch_size": 12,
+    "epochs": 24,
+    "seed": 20260823,
+    "wall_s": 0.1876,
+    "trainable_module": "actor head only",
+    "changed_parameters": [
+      "actor.0.weight",
+      "actor.0.bias",
+      "actor.2.weight",
+      "actor.2.bias"
+    ],
+    "frozen_modules": ["entity encoder", "GRU", "critic"],
+    "selection_rule": "Minimize the risk-adjusted distillation objective on complete selection trajectories, including epoch 0 as a candidate.",
+    "strict_selected_epoch": 0,
+    "selection_decision": "reject actor update",
+    "best_nonzero_epoch_for_diagnostic_only": 1,
+    "offline_metrics": {
+      "train": {
+        "source_expected_collision_risk": 0.19158666,
+        "student_expected_collision_risk": 0.19108424,
+        "source_objective": 0.19238192,
+        "student_objective": 0.19103369
+      },
+      "selection": {
+        "source_expected_collision_risk": 0.16903849,
+        "student_expected_collision_risk": 0.16928291,
+        "source_objective": 0.15344991,
+        "student_objective": 0.15371521
+      },
+      "heldout": {
+        "source_expected_collision_risk": 0.23011817,
+        "student_expected_collision_risk": 0.23028179,
+        "source_objective": 0.21784367,
+        "student_objective": 0.21808946,
+        "source_argmax_collision_fraction": 0.08333334,
+        "student_argmax_collision_fraction": 0.08333334
+      }
+    }
+  },
+  "diagnostic_student": {
+    "training_checkpoint": "models/counterfactual/h2-h6-nmnb-v2-experimental-student.pt",
+    "training_checkpoint_sha256": "c2d545ee0dc46a9db3741b264b295414ce04b9dd2a632a83491e960d27cdca14",
+    "online_checkpoint": "models/deploy/th05-s1-lunatic-h2-h6-nmnb-v1-online.pt",
+    "online_checkpoint_sha256": "a65b14a2e68f4ce6780b587f42e50ca608bd77650b27e16355c23862598c42a1",
+    "online_checkpoint_bytes": 742729,
+    "online_modules_added": 0
+  },
+  "live_ab": {
+    "preboss_selection": {
+      "image": "external/th05-lunatic-s1-p0-p1.hdi",
+      "seeds": [1851, 1852, 1853, 1854],
+      "source": {"clears": 0, "nmnb_clears": 0, "misses": 12, "bomb_actions": 0, "mean_steps": 1492.5, "mean_return": -1.666753},
+      "student": {"clears": 0, "nmnb_clears": 0, "misses": 12, "bomb_actions": 0, "mean_steps": 1760.75, "mean_return": -2.051294},
+      "decision": "select source"
+    },
+    "full_stage_selection": {
+      "image": "external/th05-lunatic-stage1.hdi",
+      "step_limit": 7000,
+      "seeds": [1861, 1862, 1863, 1864],
+      "source": {"clears": 0, "nmnb_clears": 0, "misses": 12, "bomb_actions": 0, "mean_steps": 1775.5, "mean_return": -1.734273, "return_lcb": -2.043652},
+      "student": {"clears": 0, "nmnb_clears": 0, "misses": 12, "bomb_actions": 0, "mean_steps": 2216.25, "mean_return": -1.661493, "return_lcb": -2.2303},
+      "decision": "select source"
+    },
+    "full_stage_heldout_diagnostic": {
+      "seeds": [1871, 1872, 1873, 1874, 1875, 1876, 1877, 1878],
+      "source": {"clears": 0, "nmnb_clears": 0, "misses": 24, "bomb_actions": 0, "mean_steps": 2238.75, "median_steps": 2111.0, "mean_return": -1.650605},
+      "student": {"clears": 0, "nmnb_clears": 0, "misses": 24, "bomb_actions": 0, "mean_steps": 2216.625, "median_steps": 2340.5, "mean_return": -1.337686},
+      "interpretation": "The experimental student has higher mean return and median survival, but slightly lower mean survival, identical game-over/miss counts, and no clear. Held-out data do not override the prior source selection."
+    }
+  },
+  "online_latency_ms": {
+    "checkpoint_sha256": "a65b14a2e68f4ce6780b587f42e50ca608bd77650b27e16355c23862598c42a1",
+    "torch_threads": 1,
+    "warmup": 500,
+    "samples": 5000,
+    "complete_mean": 1.3876,
+    "complete_p50": 1.376782,
+    "complete_p95": 1.488235,
+    "complete_p99": 1.534601,
+    "complete_max": 2.665883,
+    "deadline_ms": 36.0,
+    "p99_deadline_fraction": 0.042628,
+    "emulator_paused_during_inference": true
+  },
+  "conclusion": "The grouped exact-branching and actor-only deployment pipeline is operational under a verified NMNB action contract, but this first 18-anchor training split does not generalize. Every non-zero epoch loses to the source on selection objective; the diagnostic epoch also worsens held-out causal risk. Both source and student obtain 0/8 held-out Stage 1 clears and exactly 24 misses. Retain the source and reject the actor update.",
+  "next_experiment": "Increase stage-stratified counterfactual coverage and train a richer offline action-risk teacher over frozen recurrent features before distillation. Test whether the source latent state linearly separates safe actions; if not, permit offline encoder/GRU adaptation with a strict behavior trust region while keeping the deployed architecture and NMNB mask unchanged."
+}

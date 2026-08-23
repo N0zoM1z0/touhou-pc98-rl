@@ -499,21 +499,61 @@ evaluated policy. Exact outcomes are in
 `experiments/2026-08-22-th05-high-risk-counterfactual-pilot.json` and
 `experiments/2026-08-22-th05-immediate-counterfactual-pilot.json`.
 
+### Grouped NMNB counterfactual distillation
+
+The deployment objective is now strict no-miss, no-bomb (NMNB). `allow_bombs`
+is a checkpointed runtime contract: action 18 is always masked, native
+deathbomb rescue is disabled, and evaluation reports both `bomb_actions` and
+`nmnb_success`. Five trajectories collected before this clarification were
+moved aside and excluded because their navigation histories could contain
+automatic deathbombs, even though their individual branches did not.
+
+The clean H2/H6 dataset uses seeded categorical navigation only to diversify
+reachable states. Every exact branch then holds one movement action for two
+native frames and follows the deterministic source actor under H6, without
+bombs. Complete trajectories, not anchors, define the splits. Train has 6
+trajectories, 18 anchors, 52 colliding actions, and 248 horizon-safe actions;
+selection has 3/9/27/117; held-out has 4/12/52/152. No compact-observation SHA
+appears in more than one split.
+
+Only the four actor-head tensors are trainable; the entity encoder, GRU, and
+critic remain byte-identical. The best non-zero update lowers train expected
+collision mass from 0.19159 to 0.19108, but raises it on selection from 0.16904
+to 0.16928 and on held-out from 0.23012 to 0.23028. Epoch 0 is therefore the
+strict selection winner. Keeping epoch 1 only as a diagnostic avoids the common
+mistake of forcing selection to choose some trained checkpoint.
+
+Under the matched NMNB runtime, neither source nor diagnostic student clears
+any of four pre-boss selection episodes, four complete-stage selection
+episodes, or eight complete-stage held-out episodes. In the final eight-seed
+comparison both have 24 misses and zero bomb actions. Student mean return is
+higher (-1.338 versus -1.651), but mean survival steps are slightly lower
+(2216.6 versus 2238.8), so the update is rejected. Its unchanged 180,456-
+parameter online path remains fast at 1.535 ms p99 on one CPU thread.
+
+This negative result localizes the next problem. Exact action credit is no
+longer missing, but 18 anchors do not make a frozen recurrent representation
+support a general action-risk correction. The next experiment should increase
+stage-stratified trajectory coverage and test linear action-risk separability
+before deciding whether to keep the encoder/GRU frozen. Full data boundaries,
+hashes, and results are in
+`experiments/2026-08-23-th05-nmnb-counterfactual-distillation.json`.
+
 ## Next experiments
 
 The highest-value next work is:
 
-1. Collect H2-triggered branches across many trajectories and anchors, reserve
-   untouched anchor groups for selection/held-out evaluation, then distill the
-   action-contrastive collision-time labels into the unchanged deadline-bounded
-   actor.
+1. Scale H2-triggered collection across stage-stratified trajectories and test
+   whether safe actions are linearly separable in the frozen recurrent state;
+   only then compare a larger offline teacher or encoder/GRU adaptation under a
+   strict behavior trust region.
 2. Add compact normal-enemy tokens as a separately ablated information change;
    do not confound it with the counterfactual-supervision experiment.
 3. Audit special-projectile collision boxes before widening any predictive mask.
 4. Synchronize each environment step to an observed native-frame advance, then
    implement a reset-aware sequence-block collector and verify its on-policy
    age bound before using its throughput result in algorithm comparisons.
-5. Continue Stage 1 from its true low-power start, requiring held-out no-miss
+5. Continue Stage 1 from its true low-power start, requiring held-out NMNB
    completion rather than ordinary completion before advancing to later stages.
 6. Implement TH01-04 adapters behind the same Gymnasium interface and add
    per-game contract tests before claiming full old-five-games support.

@@ -941,6 +941,79 @@ This is causal-label feasibility, not policy improvement.  A multi-trajectory,
 group-held-out branch dataset and a distilled-actor evaluation are required
 before the labels count as learning evidence.
 
+We next tighten the deployment objective to no miss, no bomb (NMNB).  This is a
+different task from the earlier deathbomb-enabled evaluations: action 18 is
+permanently masked, the native deathbomb guard is disabled, and a success
+requires a stage clear, zero misses, and zero bomb actions.  Five trajectories
+collected before this clarification are excluded because their navigation
+histories could contain automatic deathbombs.  This exclusion illustrates why
+the action-space contract belongs in checkpoint and dataset provenance rather
+than in an informal evaluation description.
+
+For the clean dataset, seeded categorical source-policy navigation diversifies
+states between anchors, while every branch continuation remains deterministic
+H6 control without bombs.  We retain only complete anchors containing at least
+one colliding and one horizon-safe movement action.  Complete trajectories are
+assigned to train, selection, or held-out groups; no compact-observation hash
+occurs in two groups.  Table~\ref{tab:nmnb-branches} summarizes the resulting
+39 anchors.
+
+\begin{table}[ht]
+  \centering
+  \caption{Grouped H2-triggered, H6-continuation NMNB counterfactual data.}
+  \label{tab:nmnb-branches}
+  \begin{tabular}{lrrrr}
+    \toprule
+    Split & Trajectories & Anchors & Collision actions & Safe actions \\
+    \midrule
+    Train & 6 & 18 & 52 & 248 \\
+    Selection & 3 & 9 & 27 & 117 \\
+    Held-out & 4 & 12 & 52 & 152 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The direct teacher subtracts three times binary collision risk from behavior
+logits and retains a 0.5 behavior KL anchor.  Only the four actor-head tensors
+are trainable; encoder, GRU, and critic tensors remain byte-identical.  The best
+nonzero epoch lowers train expected collision mass from 0.19159 to 0.19108, but
+raises selection mass from 0.16904 to 0.16928 and held-out mass from 0.23012 to
+0.23028.  The corresponding risk-adjusted objectives also worsen on both
+untrained groups.  Crucially, epoch zero participates in selection, so the
+scientific decision is to retain the source.  Epoch one is kept only as a
+minimum-change diagnostic student; forcing a trained epoch to win would turn a
+negative experiment into selection bias.
+
+Table~\ref{tab:nmnb-live} returns to the complete Stage 1 image under the same
+NMNB action mask.  Neither system clears any episode and every episode consumes
+all three lives.  The diagnostic student has a higher held-out mean return and
+median survival, but slightly lower mean survival and identical failure count.
+Held-out results do not override the earlier source selection.
+
+\begin{table}[ht]
+  \centering
+  \caption{Complete Stage 1 NMNB evaluation; misses are totals and bomb actions
+  are zero in every episode.}
+  \label{tab:nmnb-live}
+  \begin{tabular}{lrrrrrrrr}
+    \toprule
+    & \multicolumn{4}{c}{Selection 1861--1864} &
+      \multicolumn{4}{c}{Held-out 1871--1878} \\
+    System & Clear & NMNB & Miss & Mean steps & Clear & NMNB & Miss & Mean steps \\
+    \midrule
+    Frozen source & 0/4 & 0/4 & 12 & 1775.5 & 0/8 & 0/8 & 24 & 2238.8 \\
+    Diagnostic actor & 0/4 & 0/4 & 12 & 2216.2 & 0/8 & 0/8 & 24 & 2216.6 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Thus exact action credit is operational, but the present 18-anchor update does
+not generalize through a frozen recurrent representation.  The next test must
+increase stage-stratified coverage and measure action-risk separability before
+unfreezing representation layers.  The online/offline boundary remains intact:
+the diagnostic actor adds no module, and its one-thread complete-path p99 is
+1.535 ms, or 4.26\% of the 36-ms budget.
+
 The full-stage result separates completion from survival.  Table~\ref{tab:full-risk}
 uses a 7,000-step limit and the same explicit runtime safety configuration for
 both checkpoints.  An earlier attempted comparison inherited different
@@ -1004,7 +1077,8 @@ recorded in five machine-readable files:
   \item \path{experiments/2026-08-22-th05-lunatic-stage-boundary.json};
   \item \path{experiments/2026-08-22-th05-savestate-branching-probe.json};
   \item \path{experiments/2026-08-22-th05-high-risk-counterfactual-pilot.json};
-  \item \path{experiments/2026-08-22-th05-immediate-counterfactual-pilot.json}.
+  \item \path{experiments/2026-08-22-th05-immediate-counterfactual-pilot.json};
+  \item \path{experiments/2026-08-23-th05-nmnb-counterfactual-distillation.json}.
 \end{itemize}
 
 \section{Threats to validity}
@@ -1117,11 +1191,13 @@ from nine to seven.  On the complete stage it increases held-out clears from
 from 12 to 13.  Its exported online path remains small at 1.474-ms p99.  The
 deterministic save-state substrate passes byte-exact replay, and the H2 pilot
 yields ten colliding versus two safe legal actions from the same high-risk
-anchor.  The next teacher should collect grouped multi-anchor collision-time
-labels and distill the resulting action-contrastive distribution.  The branch
-evaluator, save states, and risk model remain absent from deployment.  This experiment is
-rejected unless its advantage survives both actor distillation and untouched
-full-stage seeds.
+anchor.  The grouped NMNB follow-up collects 39 anchors from 13 disjoint
+trajectories.  Every nonzero actor epoch loses to the source on selection
+objective, and the diagnostic epoch obtains 0/8 held-out Stage 1 clears with
+24 misses, identical to the source.  H7 remains supported as a systems
+boundary but this first counterfactual learner is rejected.  The branch
+evaluator and save states remain absent from deployment; the next test must
+scale stage-stratified data and audit frozen-feature action-risk separability.
 
 \paragraph{H8: old-five-games interface.}
 Define per-game contracts for observation schema, action meaning, terminal
@@ -1152,12 +1228,13 @@ both full-stage policies have zero no-miss clears and student misses increase
 from 12 to 13.  The exported 180,456-parameter actor contains neither optimizer
 nor risk head and its complete decision p99 is 1.474 ms on one CPU thread.
 This is evidence for the offline/online boundary and curriculum completion,
-not mastery.  Byte-exact save-state replay makes the next counterfactual data
-experiment operational without changing deployment; one H2 anchor already
-separates ten colliding actions from two safe upward actions.  The main
-scientific task is now multi-anchor action-contrastive offline
-supervision under untouched full-stage evaluation, followed by the omitted
-normal-enemy observation and eventually TH01--04 adapters.
+not mastery.  Byte-exact save-state replay then supports a strict NMNB dataset
+of 39 anchors from 13 trajectory-disjoint runs.  The causal labels are real,
+but an 18-anchor actor-head training split does not generalize: epoch zero wins
+selection, and both source and diagnostic student obtain 0/8 held-out Stage 1
+clears with 24 misses.  The main scientific task is now stage-stratified
+counterfactual coverage and a frozen-feature separability audit, followed by
+the omitted normal-enemy observation and eventually TH01--04 adapters.
 
 \bibliographystyle{plain}
 \bibliography{references}
