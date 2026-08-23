@@ -237,6 +237,7 @@ def collect_trajectory(task: dict[str, Any]) -> dict[str, Any]:
     anchors: list[dict[str, Any]] = []
     anchors_evaluated = 0
     rejected_noncontrastive = 0
+    rejected_incomplete = 0
     terminal = False
     truncated = False
     last_anchor_decision = -int(task["min_anchor_gap"])
@@ -311,8 +312,8 @@ def collect_trajectory(task: dict[str, Any]) -> dict[str, Any]:
                                 }
                             )
                             continue
-                        outcomes.append(
-                            branch_action(
+                        try:
+                            outcome = branch_action(
                                 env=env,
                                 model=model,
                                 continuation_shield=continuation_shield,
@@ -323,7 +324,21 @@ def collect_trajectory(task: dict[str, Any]) -> dict[str, Any]:
                                 ),
                                 native_frames=int(task["native_frames"]),
                             )
-                        )
+                        except (RuntimeError, TimeoutError) as error:
+                            outcome = {
+                                "action": action,
+                                "collision_decision": None,
+                                "collision_native_frames": None,
+                                "collision_kind": "branch_error",
+                                "terminal": False,
+                                "end_flag": 0,
+                                "frames_evaluated": 0,
+                                "final_stage_frame": int(
+                                    anchor_info["raw_frame"].stage_frame()
+                                ),
+                                "error": f"{type(error).__name__}: {error}",
+                            }
+                        outcomes.append(outcome)
                     env.deathbomb_guard = True
                     observation, info = env.load_branch_state()
                     anchors_evaluated += 1
@@ -342,7 +357,11 @@ def collect_trajectory(task: dict[str, Any]) -> dict[str, Any]:
                         for item in legal_outcomes
                         if item["collision_decision"] is None
                     ]
-                    contrastive = bool(collisions and safe)
+                    complete = not any(
+                        item["collision_kind"] == "branch_error"
+                        for item in legal_outcomes
+                    )
+                    contrastive = bool(complete and collisions and safe)
                     anchor = {
                         "search_decision": search_decision,
                         "stage_frame": int(anchor_info["raw_frame"].stage_frame()),
@@ -356,16 +375,19 @@ def collect_trajectory(task: dict[str, Any]) -> dict[str, Any]:
                         "collision_actions": len(collisions),
                         "horizon_safe_actions": len(safe),
                         "contrastive": contrastive,
+                        "complete": complete,
                         "outcomes": outcomes,
                         "_actor_feature": (
                             anchor_next_hidden.squeeze(0).squeeze(0).numpy(force=True)
                         ),
                     }
-                    if contrastive or not bool(task["require_action_contrast"]):
+                    if not complete:
+                        rejected_incomplete += 1
+                    elif contrastive or not bool(task["require_action_contrast"]):
                         anchors.append(anchor)
-                        last_anchor_decision = search_decision
                     else:
                         rejected_noncontrastive += 1
+                    last_anchor_decision = search_decision
                     next_hidden = anchor_next_hidden
 
             observation, _, terminal, truncated, info = env.step_native_frames(
@@ -422,6 +444,7 @@ def collect_trajectory(task: dict[str, Any]) -> dict[str, Any]:
         "anchors_evaluated": anchors_evaluated,
         "anchors_retained": len(anchors),
         "anchors_rejected_noncontrastive": rejected_noncontrastive,
+        "anchors_rejected_incomplete": rejected_incomplete,
         "collision_actions": collision_actions,
         "horizon_safe_actions": safe_actions,
         "dataset": str(dataset_path),
@@ -596,17 +619,19 @@ def main() -> None:
             ),
             "trajectories": [
                 {
-                    key: item[key]
-                    for key in (
-                        "trajectory_id",
-                        "seed",
-                        "anchors_evaluated",
-                        "anchors_retained",
-                        "anchors_rejected_noncontrastive",
-                        "collision_actions",
-                        "horizon_safe_actions",
-                        "dataset",
-                    )
+                    "trajectory_id": item["trajectory_id"],
+                    "seed": item["seed"],
+                    "anchors_evaluated": item["anchors_evaluated"],
+                    "anchors_retained": item["anchors_retained"],
+                    "anchors_rejected_noncontrastive": item.get(
+                        "anchors_rejected_noncontrastive", 0
+                    ),
+                    "anchors_rejected_incomplete": item.get(
+                        "anchors_rejected_incomplete", 0
+                    ),
+                    "collision_actions": item["collision_actions"],
+                    "horizon_safe_actions": item["horizon_safe_actions"],
+                    "dataset": item["dataset"],
                 }
                 for item in trajectories
             ],
