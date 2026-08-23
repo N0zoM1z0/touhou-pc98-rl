@@ -10,4 +10,5 @@ Build it from the repository root:
 make paper
 ```
 
-The PDF is written to ignored `paper/build/main.pdf`.
+The intermediate PDF is written to ignored `paper/build/main.pdf`, then copied
+to tracked `paper/main.pdf` as the public research snapshot.

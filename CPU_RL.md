@@ -539,14 +539,40 @@ before deciding whether to keep the encoder/GRU frozen. Full data boundaries,
 hashes, and results are in
 `experiments/2026-08-23-th05-nmnb-counterfactual-distillation.json`.
 
+### Frozen-feature audit and pause checkpoint
+
+A linear/MLP probe tested whether the frozen 128-dimensional source GRU state
+contains transferable per-action collision information. Selection chose a
+linear probe at epoch 1 with ROC-AUC 0.565, but its trajectory-held-out ROC-AUC
+was 0.483. A constant per-action collision-rate baseline obtained 0.589 on the
+same held-out group. This rejects the small-data separability hypothesis; it
+does not yet distinguish data scarcity from a representation failure because
+the probe had only 18 training anchors.
+
+To resolve that ambiguity later, a larger strict-NMNB dataset has been
+collected locally but deliberately not trained on. It contains 24/8/8 disjoint
+train/selection/held-out trajectories and 96/32/32 anchors. Their legal-action
+labels contain 423/120/112 collisions and 1,119/366/398 horizon-safe outcomes,
+with zero compact-observation hash overlap between splits. Seed 2048 was
+excluded after three identical emulator frame-advance failures and replaced by
+2049 before any v2 learning or model selection. The held-out split has only
+been opened for dataset integrity and inventory counts, never for v2 model or
+epoch selection.
+
+The raw dataset remains under ignored `runs/` and is not part of the public
+repository. Its exact local paths, seeds, counts, exclusion, and continuation
+decision are recorded in
+`experiments/2026-08-23-th05-nmnb-scaling-checkpoint.json`. No v2 separability
+probe, distillation, or live A/B has been run; this is the clean resume point.
+
 ## Next experiments
 
 The highest-value next work is:
 
-1. Scale H2-triggered collection across stage-stratified trajectories and test
-   whether safe actions are linearly separable in the frozen recurrent state;
-   only then compare a larger offline teacher or encoder/GRU adaptation under a
-   strict behavior trust region.
+1. Run the grouped separability audit on the collected 96/32 train/selection
+   anchors. Open held-out metrics only after selecting the probe. If transfer
+   remains near chance, collect raw sequences and adapt the encoder/GRU offline
+   under a strict behavior trust region rather than forcing actor distillation.
 2. Add compact normal-enemy tokens as a separately ablated information change;
    do not confound it with the counterfactual-supervision experiment.
 3. Audit special-projectile collision boxes before widening any predictive mask.

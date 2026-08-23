@@ -1,0 +1,79 @@
+{
+  "status": "collected_and_unevaluated",
+  "stopped_at_user_request": true,
+  "research_question": "Was the failed frozen-feature action-risk audit caused mainly by the 18-anchor training set, or by an insufficient recurrent representation?",
+  "objective": "TH05 Lunatic Stage 1 no-miss, no-bomb clear",
+  "cpu_only": true,
+  "action_contract": {
+    "bomb_action_masked": true,
+    "deathbomb_guard": false,
+    "nmnb_required": true
+  },
+  "source_checkpoint": {
+    "path": "models/deploy/th05-s1-lunatic-stage1-online.pt",
+    "sha256": "773c40d971d0b112cf808885f777cf616c25ef0a6a9b3a7dc9caddd6631c68bb"
+  },
+  "small_dataset_separability_audit": {
+    "train_trajectories": 6,
+    "train_anchors": 18,
+    "selected_architecture": "linear",
+    "selected_epoch": 1,
+    "selection_roc_auc": 0.56505223,
+    "heldout_roc_auc": 0.48279352,
+    "heldout_average_precision": 0.2681478,
+    "heldout_balanced_bce": 0.71881521,
+    "constant_action_rate_heldout_roc_auc": 0.58919534,
+    "supports_frozen_feature_action_risk": false,
+    "decision": "Do not assume that the frozen source GRU state supports transferable action-risk prediction. Scale data before deciding to adapt the representation."
+  },
+  "scaled_dataset": {
+    "root": "runs/counterfactual/h2-h6-nmnb-v2",
+    "tracked_by_git": false,
+    "dataset_format": "pc98rl-counterfactual-trajectory-v2-nmnb",
+    "trigger_horizon": 2,
+    "continuation_horizon": 6,
+    "continuation": "deterministic source actor under H6 regular-bullet safety with bombs disabled",
+    "split_unit": "complete trajectory",
+    "train": {
+      "seeds": [2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2010, 2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024],
+      "trajectories": 24,
+      "anchors": 96,
+      "collision_actions": 423,
+      "horizon_safe_actions": 1119
+    },
+    "selection": {
+      "seeds": [2031, 2032, 2033, 2034, 2035, 2036, 2037, 2038],
+      "trajectories": 8,
+      "anchors": 32,
+      "collision_actions": 120,
+      "horizon_safe_actions": 366
+    },
+    "heldout": {
+      "seeds": [2041, 2042, 2043, 2044, 2045, 2046, 2047, 2049],
+      "trajectories": 8,
+      "anchors": 32,
+      "collision_actions": 112,
+      "horizon_safe_actions": 398,
+      "used_for_model_or_epoch_selection": false,
+      "opened_only_for_dataset_inventory_validation": true
+    },
+    "cross_split_observation_sha256_overlap": 0,
+    "excluded_seed": {
+      "seed": 2048,
+      "reason": "The emulator failed to advance two native frames on three complete seed-level attempts.",
+      "replacement_seed": 2049,
+      "replacement_chosen_before_v2_learning_or_model_selection": true
+    }
+  },
+  "not_run": [
+    "scaled frozen-feature separability audit",
+    "scaled actor-head distillation",
+    "live pre-boss or complete-stage A/B evaluation"
+  ],
+  "next_resume_point": [
+    "Run the linear/MLP grouped separability audit on the v2 train and selection splits, selecting without held-out feedback.",
+    "Open held-out metrics once for the selected probe and compare against the constant per-action collision-rate baseline.",
+    "Distill only if the scaled probe transfers; otherwise collect raw observations and sequences and test offline encoder/GRU adaptation under a behavior trust region.",
+    "Promote a checkpoint only after live multi-seed NMNB Stage 1 clears improve; ordinary clears, return, or survival time are insufficient."
+  ]
+}

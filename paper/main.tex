@@ -1014,6 +1014,25 @@ unfreezing representation layers.  The online/offline boundary remains intact:
 the diagnostic actor adds no module, and its one-thread complete-path p99 is
 1.535 ms, or 4.26\% of the 36-ms budget.
 
+A direct frozen-feature audit sharpens this negative result.  Selection chooses
+a linear per-action risk probe at epoch 1 (ROC-AUC 0.565), but the selected
+probe obtains held-out ROC-AUC 0.483.  A constant per-action collision-rate
+baseline obtains 0.589 on that held-out split.  We therefore reject the claim
+that the small dataset demonstrates transferable risk separation; with only 18
+training anchors, the audit cannot distinguish data scarcity from missing
+information in the frozen recurrent state.
+
+Before pausing the project, we collect---but do not train on---a larger strict
+NMNB dataset.  The train split contains 24 trajectories and 96 anchors;
+selection and held-out each contain 8 trajectories and 32 anchors.  Their
+collision counts are 423, 120, and 112, while the corresponding safe counts are
+1,119, 366, and 398.  No compact-observation hash is shared across splits.
+Seed 2048 is excluded after three reproducible emulator frame-advance failures
+and replaced by seed 2049 before any model selection.  The held-out split is
+inspected only for integrity and inventory counts.  No scaled separability
+audit, actor distillation, or live evaluation is reported; these data define a
+clean continuation point rather than new learning evidence.
+
 The full-stage result separates completion from survival.  Table~\ref{tab:full-risk}
 uses a 7,000-step limit and the same explicit runtime safety configuration for
 both checkpoints.  An earlier attempted comparison inherited different
@@ -1071,14 +1090,15 @@ deployment.
 \end{table}
 
 Exact datasets, seeds, checksums, negative controls, and latency quantiles are
-recorded in five machine-readable files:
+recorded in seven machine-readable files:
 \begin{itemize}
   \item \path{experiments/2026-08-22-th05-lunatic-offline-online.json};
   \item \path{experiments/2026-08-22-th05-lunatic-stage-boundary.json};
   \item \path{experiments/2026-08-22-th05-savestate-branching-probe.json};
   \item \path{experiments/2026-08-22-th05-high-risk-counterfactual-pilot.json};
   \item \path{experiments/2026-08-22-th05-immediate-counterfactual-pilot.json};
-  \item \path{experiments/2026-08-23-th05-nmnb-counterfactual-distillation.json}.
+  \item \path{experiments/2026-08-23-th05-nmnb-counterfactual-distillation.json};
+  \item \path{experiments/2026-08-23-th05-nmnb-scaling-checkpoint.json}.
 \end{itemize}
 
 \section{Threats to validity}
@@ -1198,6 +1218,9 @@ objective, and the diagnostic epoch obtains 0/8 held-out Stage 1 clears with
 boundary but this first counterfactual learner is rejected.  The branch
 evaluator and save states remain absent from deployment; the next test must
 scale stage-stratified data and audit frozen-feature action-risk separability.
+The first such audit reaches only 0.483 held-out ROC-AUC, below a 0.589
+constant-action-rate baseline.  A 96/32/32-anchor trajectory-disjoint dataset
+is collected as an unevaluated continuation checkpoint.
 
 \paragraph{H8: old-five-games interface.}
 Define per-game contracts for observation schema, action meaning, terminal
@@ -1234,7 +1257,10 @@ but an 18-anchor actor-head training split does not generalize: epoch zero wins
 selection, and both source and diagnostic student obtain 0/8 held-out Stage 1
 clears with 24 misses.  The main scientific task is now stage-stratified
 counterfactual coverage and a frozen-feature separability audit, followed by
-the omitted normal-enemy observation and eventually TH01--04 adapters.
+the omitted normal-enemy observation and eventually TH01--04 adapters.  The
+small-data audit is negative (0.483 held-out ROC-AUC versus 0.589 for a constant
+action-rate baseline); a larger 96/32/32-anchor split is collected but remains
+unevaluated at this stopping point.
 
 \bibliographystyle{plain}
 \bibliography{references}
